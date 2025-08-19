@@ -67,18 +67,17 @@ type EmitterWrapper struct {
 }
 
 type Collector struct {
+	sync.Mutex
 	// periodically collects metrics from inputs
-	inputsMutex sync.Mutex
-	inputs      []*InputWrapper
-	interval    time.Duration
-	closeCh     chan struct{}
-	stopWg      sync.WaitGroup
+	inputs   []*InputWrapper
+	interval time.Duration
+	closeCh  chan struct{}
+	stopWg   sync.WaitGroup
 
 	// event-driven emitters
-	emittersMutex sync.Mutex
-	emitters      map[string]*EmitterWrapper
-	recvCh        chan Measurement
-	recvChSize    int
+	emitters   map[string]*EmitterWrapper
+	recvCh     chan Measurement
+	recvChSize int
 
 	// time series configuration
 	series       []CollectorSeries
@@ -147,8 +146,8 @@ func (c *Collector) AddInput(input Input) {
 }
 
 func (c *Collector) AddInputFunc(input InputFunc) {
-	c.inputsMutex.Lock()
-	defer c.inputsMutex.Unlock()
+	c.Lock()
+	defer c.Unlock()
 	iw := &InputWrapper{
 		input:          input,
 		mtsFields:      make(map[string]MetricTimeSeries),
@@ -186,8 +185,8 @@ func (c *Collector) Stop() {
 }
 
 func (c *Collector) runInputs(tm time.Time) {
-	c.inputsMutex.Lock()
-	defer c.inputsMutex.Unlock()
+	c.Lock()
+	defer c.Unlock()
 
 	for _, iw := range c.inputs {
 		measure, err := iw.input()
@@ -238,8 +237,8 @@ func (c *Collector) SendEvent(m Measurement) {
 }
 
 func (c *Collector) receive(m Measurement) {
-	c.emittersMutex.Lock()
-	defer c.emittersMutex.Unlock()
+	c.Lock()
+	defer c.Unlock()
 
 	now := nowFunc()
 
@@ -306,8 +305,8 @@ func (mts MetricTimeSeries) String() string {
 }
 
 func (c *Collector) Names() []string {
-	c.inputsMutex.Lock()
-	defer c.inputsMutex.Unlock()
+	c.Lock()
+	defer c.Unlock()
 	names := make([]string, 0, len(c.inputs))
 	for _, iw := range c.inputs {
 		for _, publishedName := range iw.publishedNames {
@@ -336,8 +335,8 @@ func (c *Collector) syncStorage() {
 		return
 	}
 	func() {
-		c.inputsMutex.Lock()
-		defer c.inputsMutex.Unlock()
+		c.Lock()
+		defer c.Unlock()
 		for _, iw := range c.inputs {
 			for fieldName, mts := range iw.mtsFields {
 				for _, ts := range mts {
@@ -349,11 +348,12 @@ func (c *Collector) syncStorage() {
 				}
 			}
 		}
+
 	}()
 
 	func() {
-		c.emittersMutex.Lock()
-		defer c.emittersMutex.Unlock()
+		c.Lock()
+		defer c.Unlock()
 		for measureName, emit := range c.emitters {
 			for fieldName, mts := range emit.mtsFields {
 				for _, ts := range mts {
