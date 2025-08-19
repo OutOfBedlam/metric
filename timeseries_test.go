@@ -1,6 +1,7 @@
 package metric
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -8,19 +9,18 @@ import (
 )
 
 func TestTimeseries(t *testing.T) {
-	now := time.Date(2023, 10, 1, 12, 4, 5, 0, time.UTC)
+	now := time.Date(2023, 10, 1, 12, 4, 4, 400_000_000, time.UTC)
 	nowFunc = func() time.Time { return now }
 
-	ts := NewTimeSeries[float64](time.Second, 3, AVG)
-	ts.useRawTime = true
+	ts := NewTimeSeries(time.Second, 3, NewMeter())
 	ts.Add(1.0)
 
 	now = now.Add(time.Second)
 	ts.Add(2.0)
 
 	require.JSONEq(t, `[`+
-		`{"ts":"2023-10-01T12:04:05Z","value":1},`+
-		`{"ts":"2023-10-01T12:04:06Z","value":2}`+
+		`{"ts":"2023-10-01T12:04:05Z","value":{"count":1,"max":1,"min":1,"first":1,"last":1,"sum":1}},`+
+		`{"ts":"2023-10-01T12:04:06Z","value":{"count":1,"max":2,"min":2,"first":2,"last":2,"sum":2}}`+
 		`]`, ts.String())
 
 	now = now.Add(time.Second)
@@ -29,19 +29,17 @@ func TestTimeseries(t *testing.T) {
 	now = now.Add(time.Second)
 	ts.Add(4.0)
 
-	times, values := ts.Values()
+	ss := ts.Snapshot()
 	require.Equal(t, []time.Time{
 		time.Date(2023, time.October, 1, 12, 4, 6, 0, time.UTC),
 		time.Date(2023, time.October, 1, 12, 4, 7, 0, time.UTC),
 		time.Date(2023, time.October, 1, 12, 4, 8, 0, time.UTC),
-	}, times)
-	require.Equal(t, []float64{2, 3, 4}, values)
-
-	require.JSONEq(t, `[`+
-		`{"ts":"2023-10-01T12:04:06Z","value":2},`+
-		`{"ts":"2023-10-01T12:04:07Z","value":3},`+
-		`{"ts":"2023-10-01T12:04:08Z","value":4}`+
-		`]`, ts.String())
+	}, ss.Times)
+	require.Equal(t, []Product{
+		&MeterProduct{Min: 2, Max: 2, First: 2, Last: 2, Sum: 2, Count: 1},
+		&MeterProduct{Min: 3, Max: 3, First: 3, Last: 3, Sum: 3, Count: 1},
+		&MeterProduct{Min: 4, Max: 4, First: 4, Last: 4, Sum: 4, Count: 1},
+	}, ss.Values)
 
 	now = now.Add(100 * time.Millisecond)
 	ts.Add(5.0)
@@ -49,31 +47,43 @@ func TestTimeseries(t *testing.T) {
 	now = now.Add(200 * time.Millisecond)
 	ts.Add(4.8)
 
-	require.JSONEq(t, `[`+
-		`{"ts":"2023-10-01T12:04:06Z","value":2},`+
-		`{"ts":"2023-10-01T12:04:07Z","value":3},`+
-		`{"ts":"2023-10-01T12:04:08Z","value":4.6}`+
-		`]`, ts.String())
+	ss = ts.Snapshot()
+	require.Equal(t, []time.Time{
+		time.Date(2023, time.October, 1, 12, 4, 6, 0, time.UTC),
+		time.Date(2023, time.October, 1, 12, 4, 7, 0, time.UTC),
+		time.Date(2023, time.October, 1, 12, 4, 8, 0, time.UTC),
+	}, ss.Times)
+	require.Equal(t, []Product{
+		&MeterProduct{Min: 2, Max: 2, First: 2, Last: 2, Sum: 2, Count: 1},
+		&MeterProduct{Min: 3, Max: 3, First: 3, Last: 3, Sum: 3, Count: 1},
+		&MeterProduct{Min: 4, Max: 5, First: 4, Last: 4.8, Sum: 13.8, Count: 3},
+	}, ss.Values)
 
 	now = now.Add(1700 * time.Millisecond)
 	ts.Add(6.0)
 
-	require.JSONEq(t, `[`+
-		`{"ts":"2023-10-01T12:04:08Z","value":4.6},`+
-		`{"ts":"2023-10-01T12:04:09Z"},`+
-		`{"ts":"2023-10-01T12:04:10Z","value":6}`+
-		`]`, ts.String())
+	ss = ts.Snapshot()
+	require.Equal(t, []time.Time{
+		time.Date(2023, time.October, 1, 12, 4, 8, 0, time.UTC),
+		time.Date(2023, time.October, 1, 12, 4, 9, 0, time.UTC),
+		time.Date(2023, time.October, 1, 12, 4, 10, 0, time.UTC),
+	}, ss.Times)
+	require.Equal(t, []Product{
+		&MeterProduct{Min: 4, Max: 5, First: 4, Last: 4.8, Sum: 13.8, Count: 3},
+		nil, //&MeterProduct{Min: 0, Max: 0, First: 0, Last: 0, Total: 0, Count: 0}},
+		&MeterProduct{Min: 6, Max: 6, First: 6, Last: 6, Sum: 6, Count: 1},
+	}, ss.Values)
 
 	now = now.Add(5 * time.Second)
 	ts.Add(7.0)
 
 	require.JSONEq(t, `[`+
-		`{"ts":"2023-10-01T12:04:15Z","value":7.0}`+
+		`{"ts":"2023-10-01T12:04:15Z","value":{"count":1,"max":7,"min":7,"first":7,"last":7,"sum":7}}`+
 		`]`, ts.String())
 }
 
 func TestTimeSeriesSubSeconds(t *testing.T) {
-	ts := NewTimeSeries[float64](time.Second, 10, LAST)
+	ts := NewTimeSeries(time.Second, 10, NewCounter())
 
 	now := time.Date(2023, 10, 1, 12, 4, 5, 0, time.UTC)
 	nowFunc = func() time.Time {
@@ -87,19 +97,19 @@ func TestTimeSeriesSubSeconds(t *testing.T) {
 	}
 
 	require.JSONEq(t, `[`+
-		`{"ts":"2023-10-01T12:04:06Z","value":10.000000},`+
-		`{"ts":"2023-10-01T12:04:07Z","value":20.000000},`+
-		`{"ts":"2023-10-01T12:04:08Z","value":30.000000},`+
-		`{"ts":"2023-10-01T12:04:09Z","value":40.000000},`+
-		`{"ts":"2023-10-01T12:04:10Z","value":50.000000},`+
-		`{"ts":"2023-10-01T12:04:11Z","value":60.000000},`+
-		`{"ts":"2023-10-01T12:04:12Z","value":70.000000},`+
-		`{"ts":"2023-10-01T12:04:13Z","value":80.000000},`+
-		`{"ts":"2023-10-01T12:04:14Z","value":90.000000},`+
-		`{"ts":"2023-10-01T12:04:15Z","value":100.000000}`+
+		`{"ts":"2023-10-01T12:04:06Z","value":{"value":55,"count":10}},`+
+		`{"ts":"2023-10-01T12:04:07Z","value":{"value":155,"count":10}},`+
+		`{"ts":"2023-10-01T12:04:08Z","value":{"value":255,"count":10}},`+
+		`{"ts":"2023-10-01T12:04:09Z","value":{"value":355,"count":10}},`+
+		`{"ts":"2023-10-01T12:04:10Z","value":{"value":455,"count":10}},`+
+		`{"ts":"2023-10-01T12:04:11Z","value":{"value":555,"count":10}},`+
+		`{"ts":"2023-10-01T12:04:12Z","value":{"value":655,"count":10}},`+
+		`{"ts":"2023-10-01T12:04:13Z","value":{"value":755,"count":10}},`+
+		`{"ts":"2023-10-01T12:04:14Z","value":{"value":855,"count":10}},`+
+		`{"ts":"2023-10-01T12:04:15Z","value":{"value":955,"count":10}}`+
 		`]`, ts.String())
 
-	ss := ts.Snapshot(nil)
+	ss := ts.Snapshot()
 	require.Equal(t, []time.Time{
 		time.Date(2023, 10, 1, 12, 4, 6, 0, time.UTC),
 		time.Date(2023, 10, 1, 12, 4, 7, 0, time.UTC),
@@ -112,15 +122,23 @@ func TestTimeSeriesSubSeconds(t *testing.T) {
 		time.Date(2023, 10, 1, 12, 4, 14, 0, time.UTC),
 		time.Date(2023, 10, 1, 12, 4, 15, 0, time.UTC),
 	}, ss.Times)
-	require.Equal(t, []float64{
-		10.0, 20.0, 30.0, 40.0, 50.0,
-		60.0, 70.0, 80.0, 90.0, 100.0,
+	require.Equal(t, []Product{
+		&CounterProduct{Value: 55, Count: 10},
+		&CounterProduct{Value: 155, Count: 10},
+		&CounterProduct{Value: 255, Count: 10},
+		&CounterProduct{Value: 355, Count: 10},
+		&CounterProduct{Value: 455, Count: 10},
+		&CounterProduct{Value: 555, Count: 10},
+		&CounterProduct{Value: 655, Count: 10},
+		&CounterProduct{Value: 755, Count: 10},
+		&CounterProduct{Value: 855, Count: 10},
+		&CounterProduct{Value: 955, Count: 10},
 	}, ss.Values)
 	require.Equal(t, time.Second, ss.Interval)
 	require.Equal(t, 10, ss.MaxCount)
 
 	ptTime, ptValue := ts.Last()
-	require.Equal(t, 100.0, ptValue)
+	require.Equal(t, &CounterProduct{Value: 955, Count: 10}, ptValue)
 	require.Equal(t, time.Date(2023, 10, 1, 12, 4, 15, 0, time.UTC), ptTime)
 
 	ptTimes, _ := ts.LastN(0)
@@ -133,19 +151,19 @@ func TestTimeSeriesSubSeconds(t *testing.T) {
 
 	ptTimes, ptValues := ts.After(time.Date(2023, 10, 1, 12, 4, 13, 0, time.UTC))
 	require.Equal(t, 3, len(ptTimes))
-	require.Equal(t, 80.0, ptValues[0])
+	require.Equal(t, &CounterProduct{Value: 755, Count: 10}, ptValues[0])
 	require.Equal(t, time.Date(2023, 10, 1, 12, 4, 13, 0, time.UTC), ptTimes[0])
-	require.Equal(t, 90.0, ptValues[1])
+	require.Equal(t, &CounterProduct{Value: 855, Count: 10}, ptValues[1])
 	require.Equal(t, time.Date(2023, 10, 1, 12, 4, 14, 0, time.UTC), ptTimes[1])
-	require.Equal(t, 100.0, ptValues[2])
+	require.Equal(t, &CounterProduct{Value: 955, Count: 10}, ptValues[2])
 	require.Equal(t, time.Date(2023, 10, 1, 12, 4, 15, 0, time.UTC), ptTimes[2])
 }
 
 func TestMultiTimeSeries(t *testing.T) {
-	mts := MultiTimeSeries[float64]{
-		NewTimeSeries[float64](time.Second, 10, LAST),
-		NewTimeSeries[float64](10*time.Second, 6, LAST),
-		NewTimeSeries[float64](60*time.Second, 5, LAST),
+	mts := MultiTimeSeries{
+		NewTimeSeries(time.Second, 10, NewMeter()),
+		NewTimeSeries(10*time.Second, 6, NewMeter()),
+		NewTimeSeries(60*time.Second, 5, NewMeter()),
 	}
 
 	now := time.Date(2023, 10, 1, 12, 4, 5, 0, time.UTC)
@@ -156,33 +174,262 @@ func TestMultiTimeSeries(t *testing.T) {
 		now = now.Add(100 * time.Millisecond)
 	}
 
+	ss := mts[0].Snapshot()
+	require.Equal(t, []time.Time{
+		time.Date(2023, 10, 1, 12, 8, 56, 0, time.UTC),
+		time.Date(2023, 10, 1, 12, 8, 57, 0, time.UTC),
+		time.Date(2023, 10, 1, 12, 8, 58, 0, time.UTC),
+		time.Date(2023, 10, 1, 12, 8, 59, 0, time.UTC),
+		time.Date(2023, 10, 1, 12, 9, 00, 0, time.UTC),
+		time.Date(2023, 10, 1, 12, 9, 01, 0, time.UTC),
+		time.Date(2023, 10, 1, 12, 9, 02, 0, time.UTC),
+		time.Date(2023, 10, 1, 12, 9, 03, 0, time.UTC),
+		time.Date(2023, 10, 1, 12, 9, 04, 0, time.UTC),
+		time.Date(2023, 10, 1, 12, 9, 05, 0, time.UTC),
+	}, ss.Times)
+	require.Equal(t, []Product{
+		&MeterProduct{Min: 2901, Max: 2910, First: 2901, Last: 2910, Sum: 29055, Count: 10},
+		&MeterProduct{Min: 2911, Max: 2920, First: 2911, Last: 2920, Sum: 29155, Count: 10},
+		&MeterProduct{Min: 2921, Max: 2930, First: 2921, Last: 2930, Sum: 29255, Count: 10},
+		&MeterProduct{Min: 2931, Max: 2940, First: 2931, Last: 2940, Sum: 29355, Count: 10},
+		&MeterProduct{Min: 2941, Max: 2950, First: 2941, Last: 2950, Sum: 29455, Count: 10},
+		&MeterProduct{Min: 2951, Max: 2960, First: 2951, Last: 2960, Sum: 29555, Count: 10},
+		&MeterProduct{Min: 2961, Max: 2970, First: 2961, Last: 2970, Sum: 29655, Count: 10},
+		&MeterProduct{Min: 2971, Max: 2980, First: 2971, Last: 2980, Sum: 29755, Count: 10},
+		&MeterProduct{Min: 2981, Max: 2990, First: 2981, Last: 2990, Sum: 29855, Count: 10},
+		&MeterProduct{Min: 2991, Max: 3000, First: 2991, Last: 3000, Sum: 29955, Count: 10},
+	}, ss.Values)
+
+	ss = mts[1].Snapshot()
+	require.Equal(t, []time.Time{
+		time.Date(2023, 10, 1, 12, 8, 20, 0, time.UTC),
+		time.Date(2023, 10, 1, 12, 8, 30, 0, time.UTC),
+		time.Date(2023, 10, 1, 12, 8, 40, 0, time.UTC),
+		time.Date(2023, 10, 1, 12, 8, 50, 0, time.UTC),
+		time.Date(2023, 10, 1, 12, 9, 00, 0, time.UTC),
+		time.Date(2023, 10, 1, 12, 9, 10, 0, time.UTC),
+	}, ss.Times)
+	require.Equal(t, []Product{
+		&MeterProduct{Min: 2451, Max: 2550, First: 2451, Last: 2550, Sum: 250050, Count: 100},
+		&MeterProduct{Min: 2551, Max: 2650, First: 2551, Last: 2650, Sum: 260050, Count: 100},
+		&MeterProduct{Min: 2651, Max: 2750, First: 2651, Last: 2750, Sum: 270050, Count: 100},
+		&MeterProduct{Min: 2751, Max: 2850, First: 2751, Last: 2850, Sum: 280050, Count: 100},
+		&MeterProduct{Min: 2851, Max: 2950, First: 2851, Last: 2950, Sum: 290050, Count: 100},
+		&MeterProduct{Min: 2951, Max: 3000, First: 2951, Last: 3000, Sum: 148775, Count: 50},
+	}, ss.Values)
+
+	ss = mts[2].Snapshot()
+	require.Equal(t, []time.Time{
+		time.Date(2023, 10, 1, 12, 6, 0, 0, time.UTC),
+		time.Date(2023, 10, 1, 12, 7, 0, 0, time.UTC),
+		time.Date(2023, 10, 1, 12, 8, 0, 0, time.UTC),
+		time.Date(2023, 10, 1, 12, 9, 0, 0, time.UTC),
+		time.Date(2023, 10, 1, 12, 10, 0, 0, time.UTC),
+	}, ss.Times)
+	require.Equal(t, []Product{
+		&MeterProduct{Min: 551, Max: 1150, First: 551, Last: 1150, Sum: 510300, Count: 600},
+		&MeterProduct{Min: 1151, Max: 1750, First: 1151, Last: 1750, Sum: 870300, Count: 600},
+		&MeterProduct{Min: 1751, Max: 2350, First: 1751, Last: 2350, Sum: 1230300, Count: 600},
+		&MeterProduct{Min: 2351, Max: 2950, First: 2351, Last: 2950, Sum: 1590300, Count: 600},
+		&MeterProduct{Min: 2951, Max: 3000, First: 2951, Last: 3000, Sum: 148775, Count: 50},
+	}, ss.Values)
+}
+
+func TestTimeSeriesCounter(t *testing.T) {
+	ts := NewTimeSeries(1*time.Second, 10, NewGauge())
+
+	now := time.Date(2025, 07, 21, 17, 31, 12, 0, time.FixedZone("Asia/Seoul", 9*60*60))
+	nowFunc = func() time.Time {
+		ret := now
+		now = now.Add(time.Millisecond * 100)
+		return ret
+	}
+
+	for i := 1; i <= 100; i++ {
+		ts.Add(float64(i))
+	}
+
+	ss := ts.Snapshot()
+	require.Equal(t, []time.Time{
+		time.Date(2025, 07, 21, 17, 31, 13, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 14, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 15, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 16, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 17, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 18, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 19, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 20, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 21, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 22, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+	}, ss.Times)
+	require.Equal(t, []Product{
+		&GaugeProduct{Count: 10, Sum: 55, Value: 10},
+		&GaugeProduct{Count: 10, Sum: 155, Value: 20},
+		&GaugeProduct{Count: 10, Sum: 255, Value: 30},
+		&GaugeProduct{Count: 10, Sum: 355, Value: 40},
+		&GaugeProduct{Count: 10, Sum: 455, Value: 50},
+		&GaugeProduct{Count: 10, Sum: 555, Value: 60},
+		&GaugeProduct{Count: 10, Sum: 655, Value: 70},
+		&GaugeProduct{Count: 10, Sum: 755, Value: 80},
+		&GaugeProduct{Count: 10, Sum: 855, Value: 90},
+		&GaugeProduct{Count: 10, Sum: 955, Value: 100},
+	}, ss.Values)
+}
+
+func TestTimeSeriesGauge(t *testing.T) {
+	ts := NewTimeSeries(time.Second, 10, NewGauge())
+
+	now := time.Date(2025, 07, 21, 17, 31, 12, 0, time.FixedZone("Asia/Seoul", 9*60*60))
+	nowFunc = func() time.Time {
+		ret := now
+		now = now.Add(time.Millisecond * 100)
+		return ret
+	}
+
+	for i := 1; i <= 100; i++ {
+		ts.Add(float64(i))
+	}
+	ss := ts.Snapshot()
+	require.Equal(t, []time.Time{
+		time.Date(2025, 07, 21, 17, 31, 13, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 14, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 15, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 16, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 17, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 18, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 19, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 20, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 21, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 22, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+	}, ss.Times)
+	require.Equal(t, []Product{
+		&GaugeProduct{Count: 10, Sum: 55, Value: 10},
+		&GaugeProduct{Count: 10, Sum: 155, Value: 20},
+		&GaugeProduct{Count: 10, Sum: 255, Value: 30},
+		&GaugeProduct{Count: 10, Sum: 355, Value: 40},
+		&GaugeProduct{Count: 10, Sum: 455, Value: 50},
+		&GaugeProduct{Count: 10, Sum: 555, Value: 60},
+		&GaugeProduct{Count: 10, Sum: 655, Value: 70},
+		&GaugeProduct{Count: 10, Sum: 755, Value: 80},
+		&GaugeProduct{Count: 10, Sum: 855, Value: 90},
+		&GaugeProduct{Count: 10, Sum: 955, Value: 100},
+	}, ss.Values)
+}
+
+func TestTimeSeriesMeter(t *testing.T) {
+	ts := NewTimeSeries(time.Second, 10, NewMeter())
+
+	now := time.Date(2025, 07, 21, 17, 31, 12, 0, time.FixedZone("Asia/Seoul", 9*60*60))
+	nowFunc = func() time.Time {
+		ret := now
+		now = now.Add(time.Millisecond * 100)
+		return ret
+	}
+
+	for i := 1; i <= 100; i++ {
+		ts.Add(float64(i))
+	}
+
+	ss := ts.Snapshot()
+	require.Equal(t, []time.Time{
+		time.Date(2025, 07, 21, 17, 31, 13, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 14, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 15, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 16, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 17, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 18, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 19, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 20, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 21, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 22, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+	}, ss.Times)
+	require.Equal(t, []Product{
+		&MeterProduct{Min: 1, Max: 10, First: 1, Last: 10, Sum: 55, Count: 10},
+		&MeterProduct{Min: 11, Max: 20, First: 11, Last: 20, Sum: 155, Count: 10},
+		&MeterProduct{Min: 21, Max: 30, First: 21, Last: 30, Sum: 255, Count: 10},
+		&MeterProduct{Min: 31, Max: 40, First: 31, Last: 40, Sum: 355, Count: 10},
+		&MeterProduct{Min: 41, Max: 50, First: 41, Last: 50, Sum: 455, Count: 10},
+		&MeterProduct{Min: 51, Max: 60, First: 51, Last: 60, Sum: 555, Count: 10},
+		&MeterProduct{Min: 61, Max: 70, First: 61, Last: 70, Sum: 655, Count: 10},
+		&MeterProduct{Min: 71, Max: 80, First: 71, Last: 80, Sum: 755, Count: 10},
+		&MeterProduct{Min: 81, Max: 90, First: 81, Last: 90, Sum: 855, Count: 10},
+		&MeterProduct{Min: 91, Max: 100, First: 91, Last: 100, Sum: 955, Count: 10},
+	}, ss.Values)
+}
+
+func TestTimeSeriesHistogram(t *testing.T) {
+	ts := NewTimeSeries(time.Second, 10, NewHistogram(100, 0.5, 0.75, 0.99))
+
+	now := time.Date(2025, 07, 21, 17, 31, 12, 0, time.FixedZone("Asia/Seoul", 9*60*60))
+	nowFunc = func() time.Time {
+		ret := now
+		now = now.Add(time.Millisecond * 100)
+		return ret
+	}
+
+	for i := 1; i <= 100; i++ {
+		ts.Add(float64(i))
+	}
+
+	ss := ts.Snapshot()
+	require.Equal(t, []time.Time{
+		time.Date(2025, 07, 21, 17, 31, 13, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 14, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 15, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 16, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 17, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 18, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 19, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 20, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 21, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 22, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+	}, ss.Times)
+	require.Equal(t, []Product{
+		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{5, 8, 10}},
+		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{15, 18, 20}},
+		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{25, 28, 30}},
+		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{35, 38, 40}},
+		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{45, 48, 50}},
+		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{55, 58, 60}},
+		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{65, 68, 70}},
+		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{75, 78, 80}},
+		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{85, 88, 90}},
+		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{95, 98, 100}},
+	}, ss.Values)
+}
+
+func createTestStorage(t *testing.T) *FileStorage {
+	t.Helper()
+	os.MkdirAll("./tmp/store", 0755)
+	storage := NewFileStorage("./tmp/store")
+	require.NotNil(t, storage)
+	return storage
+}
+
+func TestTimeseriesStorage(t *testing.T) {
+	storage := createTestStorage(t)
+	now := time.Date(2023, 10, 1, 12, 4, 4, 0, time.UTC)
+	nowFunc = func() time.Time { return now }
+
+	ts := NewTimeSeries(time.Second, 3, NewMeter())
+	ts.Add(1.0)
+
+	now = now.Add(time.Second)
+	ts.Add(2.0)
+
 	require.JSONEq(t, `[`+
-		`[`+
-		`{"ts":"2023-10-01T12:08:56Z","value":2910.000000},`+
-		`{"ts":"2023-10-01T12:08:57Z","value":2920.000000},`+
-		`{"ts":"2023-10-01T12:08:58Z","value":2930.000000},`+
-		`{"ts":"2023-10-01T12:08:59Z","value":2940.000000},`+
-		`{"ts":"2023-10-01T12:09:00Z","value":2950.000000},`+
-		`{"ts":"2023-10-01T12:09:01Z","value":2960.000000},`+
-		`{"ts":"2023-10-01T12:09:02Z","value":2970.000000},`+
-		`{"ts":"2023-10-01T12:09:03Z","value":2980.000000},`+
-		`{"ts":"2023-10-01T12:09:04Z","value":2990.000000},`+
-		`{"ts":"2023-10-01T12:09:05Z","value":3000.000000}`+
-		`],`+
-		`[`+
-		`{"ts":"2023-10-01T12:08:20Z","value":2550.000000},`+
-		`{"ts":"2023-10-01T12:08:30Z","value":2650.000000},`+
-		`{"ts":"2023-10-01T12:08:40Z","value":2750.000000},`+
-		`{"ts":"2023-10-01T12:08:50Z","value":2850.000000},`+
-		`{"ts":"2023-10-01T12:09:00Z","value":2950.000000},`+
-		`{"ts":"2023-10-01T12:09:10Z","value":3000.000000}`+
-		`],`+
-		`[`+
-		`{"ts":"2023-10-01T12:06:00Z","value":1150.000000},`+
-		`{"ts":"2023-10-01T12:07:00Z","value":1750.000000},`+
-		`{"ts":"2023-10-01T12:08:00Z","value":2350.000000},`+
-		`{"ts":"2023-10-01T12:09:00Z","value":2950.000000},`+
-		`{"ts":"2023-10-01T12:10:00Z","value":3000.000000}`+
-		`]`+
-		`]`, mts.String())
+		`{"ts":"2023-10-01T12:04:05Z","value":{"count":1,"max":1,"min":1,"first":1,"last":1,"sum":1}},`+
+		`{"ts":"2023-10-01T12:04:06Z","value":{"count":1,"max":2,"min":2,"first":2,"last":2,"sum":2}}`+
+		`]`, ts.String())
+
+	err := storage.Store("test_measure", "test_field", "3s", ts)
+	require.NoError(t, err)
+
+	loaded, err := storage.Load("test_measure", "test_field", "3s")
+	require.NoError(t, err)
+
+	require.JSONEq(t, `[`+
+		`{"ts":"2023-10-01T12:04:05Z","value":{"count":1,"max":1,"min":1,"first":1,"last":1,"sum":1}},`+
+		`{"ts":"2023-10-01T12:04:06Z","value":{"count":1,"max":2,"min":2,"first":2,"last":2,"sum":2}}`+
+		`]`, loaded.String())
 }

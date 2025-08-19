@@ -1,41 +1,82 @@
 package metric
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"sync"
 )
 
-type Bin struct {
+type HistBin struct {
 	value float64
 	count float64
+}
+
+func (hb HistBin) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf(`{"value":%f,"count":%f}`, hb.value, hb.count)), nil
+}
+
+func (hb *HistBin) UnmarshalJSON(data []byte) error {
+	var obj struct {
+		Value float64 `json:"value"`
+		Count float64 `json:"count"`
+	}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return err
+	}
+	hb.value = obj.Value
+	hb.count = obj.Count
+	return nil
 }
 
 type Histogram struct {
 	sync.Mutex
 	maxBins int
-	bins    []Bin
-	total   float64
+	bins    []HistBin
+	count   float64
+	qs      []float64 // Quantiles to calculate
 }
 
-func NewHistogram(maxBins int) *Histogram {
-	return &Histogram{
+var _ Producer = (*Histogram)(nil)
+
+func NewHistogram(maxBins int, qs ...float64) *Histogram {
+	h := &Histogram{
 		maxBins: maxBins,
+		qs:      []float64{0.5, 0.90, 0.99},
 	}
+	if len(qs) > 0 {
+		h.qs = qs
+	}
+	return h
+}
+
+func (h *Histogram) MarshalJSON() ([]byte, error) {
+	h.Lock()
+	defer h.Unlock()
+	data := make(map[string]interface{})
+	data["count"] = int64(h.count)
+	data["qs"] = h.qs
+	data["bins"] = h.bins
+	return json.Marshal(data)
+}
+
+func (h *Histogram) UnmarshalJSON(data []byte) error {
+	var obj struct {
+		Count int64     `json:"count"`
+		Qs    []float64 `json:"qs"`
+		Bins  []HistBin `json:"bins"`
+	}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return err
+	}
+	h.count = float64(obj.Count)
+	h.qs = obj.Qs
+	h.bins = obj.Bins
+	return nil
 }
 
 func (h *Histogram) String() string {
-	h.Lock()
-	defer h.Unlock()
-	v := h.Quantiles(0.5, 0.90, 0.99)
-	return fmt.Sprintf(`{"p50":%f,"p90":%f, "p99":%f}`, v[0], v[1], v[2])
-}
-
-func (h *Histogram) Reset() {
-	h.Lock()
-	defer h.Unlock()
-	h.bins = nil
-	h.total = 0
+	return h.Produce(false).String()
 }
 
 func (h *Histogram) Add(value float64) {
@@ -45,11 +86,11 @@ func (h *Histogram) Add(value float64) {
 		h.Unlock()
 	}()
 
-	h.total++
-	newBin := Bin{value: value, count: 1}
+	h.count++
+	newBin := HistBin{value: float64(value), count: 1}
 	for i := range h.bins {
-		if h.bins[i].value > value {
-			h.bins = append(h.bins[:i], append([]Bin{newBin}, h.bins[i:]...)...)
+		if h.bins[i].value > float64(value) {
+			h.bins = append(h.bins[:i], append([]HistBin{newBin}, h.bins[i:]...)...)
 			return
 		}
 	}
@@ -70,7 +111,7 @@ func (h *Histogram) trim() {
 			}
 		}
 		count := h.bins[i].count + h.bins[i-1].count
-		merged := Bin{
+		merged := HistBin{
 			value: (h.bins[i].value*h.bins[i].count + h.bins[i-1].value*h.bins[i-1].count) / count,
 			count: count,
 		}
@@ -79,15 +120,15 @@ func (h *Histogram) trim() {
 	}
 }
 
-func (h *Histogram) bin(q float64) Bin {
-	count := q * float64(h.total)
+func (h *Histogram) bin(q float64) HistBin {
+	count := q * float64(h.count)
 	for i := range h.bins {
 		count -= h.bins[i].count
 		if count <= 0 {
 			return h.bins[i]
 		}
 	}
-	return Bin{}
+	return HistBin{}
 }
 
 func (h *Histogram) Quantile(q float64) float64 {
@@ -99,10 +140,14 @@ func (h *Histogram) Quantile(q float64) float64 {
 func (h *Histogram) Quantiles(qs ...float64) []float64 {
 	h.Lock()
 	defer h.Unlock()
+	return h.quantiles(qs...)
+}
+
+func (h *Histogram) quantiles(qs ...float64) []float64 {
 	ret := make([]float64, len(qs))
 	counts := make([]float64, len(qs))
 	for i, q := range qs {
-		counts[i] = q * float64(h.total)
+		counts[i] = q * float64(h.count)
 	}
 	found := 0
 	for i := range h.bins {
@@ -121,4 +166,30 @@ func (h *Histogram) Quantiles(qs ...float64) []float64 {
 		}
 	}
 	return ret
+}
+
+func (h *Histogram) Produce(reset bool) Product {
+	h.Lock()
+	defer h.Unlock()
+	ret := &HistogramProduct{
+		Count:  int64(h.count),
+		P:      h.qs,
+		Values: h.quantiles(h.qs...),
+	}
+	if reset {
+		h.bins = nil
+		h.count = 0
+	}
+	return ret
+}
+
+type HistogramProduct struct {
+	Count  int64     `json:"count"`
+	P      []float64 `json:"p"`
+	Values []float64 `json:"values"`
+}
+
+func (hp HistogramProduct) String() string {
+	b, _ := json.Marshal(hp)
+	return string(b)
 }

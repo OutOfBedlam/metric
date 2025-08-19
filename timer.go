@@ -1,21 +1,10 @@
 package metric
 
 import (
+	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
-)
-
-var _ Value[time.Duration] = (*Timer)(nil)
-
-type TimerExtendPoint int
-
-const (
-	TimerExtendValue TimerExtendPoint = iota
-	TimerExtendCount
-	TimerExtendTotal
-	TimerExtendMin
-	TimerExtendMax
-	TimerExtendAvg
 )
 
 type Timer struct {
@@ -24,20 +13,34 @@ type Timer struct {
 	totalDuration time.Duration
 	minDuration   time.Duration
 	maxDuration   time.Duration
-	exts          map[TimerExtendPoint]Extension
 }
 
-func (t *Timer) Extend(point TimerExtendPoint, ext Extension) {
+func NewTimer() *Timer {
+	return &Timer{}
+}
+
+func (t *Timer) MarshalJSON() ([]byte, error) {
 	t.Lock()
 	defer t.Unlock()
-	if t.exts == nil {
-		t.exts = make(map[TimerExtendPoint]Extension)
+	return []byte(fmt.Sprintf(`{"count":%d,"total":%d,"min":%d,"max":%d}`,
+		t.count, t.totalDuration.Nanoseconds(), t.minDuration.Nanoseconds(), t.maxDuration.Nanoseconds())), nil
+}
+
+func (t *Timer) UnmarshalJSON(data []byte) error {
+	var obj struct {
+		Count int64         `json:"count"`
+		Total time.Duration `json:"total"`
+		Min   time.Duration `json:"min"`
+		Max   time.Duration `json:"max"`
 	}
-	if ext == nil {
-		delete(t.exts, point)
-		return
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return err
 	}
-	t.exts[point] = ext
+	t.count = obj.Count
+	t.totalDuration = obj.Total
+	t.minDuration = obj.Min
+	t.maxDuration = obj.Max
+	return nil
 }
 
 func (t *Timer) String() string {
@@ -81,24 +84,6 @@ func (t *Timer) Mark(d time.Duration) {
 	}
 	if d > t.maxDuration {
 		t.maxDuration = d
-	}
-	for point, ext := range t.exts {
-		switch point {
-		case TimerExtendValue:
-			ext.Add(float64(d.Nanoseconds()))
-		case TimerExtendCount:
-			ext.Add(float64(t.count))
-		case TimerExtendTotal:
-			ext.Add(float64(t.totalDuration))
-		case TimerExtendMin:
-			ext.Add(float64(t.minDuration))
-		case TimerExtendMax:
-			ext.Add(float64(t.maxDuration))
-		case TimerExtendAvg:
-			if t.count > 0 {
-				ext.Add(float64(t.totalDuration) / float64(t.count))
-			}
-		}
 	}
 }
 

@@ -1,59 +1,106 @@
 package metric
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 )
 
-type TimePoint[T any] struct {
-	Time  time.Time
-	Value T
-	Count int // If Count is 0, it means the point is empty
+type TimeBin struct {
+	Time   time.Time `json:"ts"`
+	Value  Product   `json:"value,omitempty"`
+	IsNull bool      `json:"isNull,omitempty"`
 }
 
-type TimeSeries[T any] struct {
+func (tv TimeBin) String() string {
+	if ((any)(tv.Value)) == nil {
+		return fmt.Sprintf(`{"ts":"%s",isNull:%t}`, tv.Time.Format(time.RFC3339), tv.IsNull)
+	}
+	return fmt.Sprintf(`{"ts":"%s","value":%s}`, tv.Time.Format(time.RFC3339), tv.Value.String())
+}
+
+func (tv TimeBin) MarshalJSON() ([]byte, error) {
+	if ((any)(tv.Value)) == nil {
+		return []byte(fmt.Sprintf(`{"ts":%d,"isNull":%t}`, tv.Time.UnixNano(), tv.IsNull)), nil
+	} else {
+		typ := fmt.Sprintf("%T", tv.Value)
+		return []byte(fmt.Sprintf(`{"ts":%d,"type":%q,"value":%s}`, tv.Time.UnixNano(), typ, tv.Value.String())), nil
+	}
+}
+
+func (tv *TimeBin) UnmarshalJSON(data []byte) error {
+	var obj struct {
+		Time   int64          `json:"ts"`
+		Type   string         `json:"type,omitempty"`
+		Value  map[string]any `json:"value,omitempty"`
+		IsNull bool           `json:"isNull,omitempty"`
+	}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return err
+	}
+	tv.Time = time.Unix(0, obj.Time).In(time.Local)
+	tv.IsNull = obj.IsNull
+	if tv.IsNull {
+		return nil
+	}
+	switch obj.Type {
+	case "*metric.CounterProduct":
+		tv.Value = &CounterProduct{}
+	case "*metric.GaugeProduct":
+		tv.Value = &GaugeProduct{}
+	case "*metric.HistogramProduct":
+		tv.Value = &HistogramProduct{}
+	case "*metric.MeterProduct":
+		tv.Value = &MeterProduct{}
+	default:
+		return fmt.Errorf("unknown product type %s", obj.Type)
+	}
+	b, err := json.Marshal(obj.Value)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(b, tv.Value); err != nil {
+		return err
+	}
+	return nil
+}
+
+type TimeSeries struct {
 	sync.Mutex
-	data       []TimePoint[T]
-	interval   time.Duration
-	maxCount   int
-	aggregator Aggregator[T]
-	useRawTime bool
-	meta       *TimeSeriesMeta // Optional metadata for the time series
-}
-
-type TimeSeriesMeta struct {
-	Title string
-	Unit  string
+	producer Producer
+	lastTime time.Time // The last time the producer was updated
+	data     []TimeBin
+	interval time.Duration
+	maxCount int
+	meta     any // Optional metadata for the time series
 }
 
 // If aggregator is nil, it will replace the last point with the new one.
 // Otherwise, it will aggregate the new point with the last one when it falls within the same interval.
-func NewTimeSeries[T any](interval time.Duration, maxCount int, agg Aggregator[T]) *TimeSeries[T] {
-	return &TimeSeries[T]{
-		data:       make([]TimePoint[T], 0, maxCount),
-		interval:   interval,
-		maxCount:   maxCount,
-		aggregator: agg,
+func NewTimeSeries(interval time.Duration, maxCount int, prod Producer) *TimeSeries {
+	return &TimeSeries{
+		producer: prod,
+		data:     make([]TimeBin, 0, maxCount),
+		interval: interval,
+		maxCount: maxCount,
 	}
 }
 
-func (ts *TimeSeries[T]) roundTime(t time.Time) time.Time {
-	if ts.useRawTime {
-		return t
-	}
+func (ts *TimeSeries) roundTime(t time.Time) time.Time {
 	return t.Add(ts.interval / 2).Round(ts.interval)
 }
 
-func (ts *TimeSeries[T]) SetMeta(meta *TimeSeriesMeta) {
+func (ts *TimeSeries) SetMeta(meta any) {
 	ts.meta = meta
 }
 
-func (ts *TimeSeries[T]) Meta() *TimeSeriesMeta {
+func (ts *TimeSeries) Meta() any {
 	return ts.meta
 }
 
-func (ts *TimeSeries[T]) String() string {
+func (ts *TimeSeries) String() string {
 	ts.Lock()
 	defer ts.Unlock()
 	result := "["
@@ -61,109 +108,96 @@ func (ts *TimeSeries[T]) String() string {
 		if i > 0 {
 			result += ","
 		}
-		t := d.Time.Format(time.RFC3339)
-		if i == len(ts.data)-1 {
-			// Round the last time
-			t = ts.roundTime(d.Time).Format(time.RFC3339)
-		}
-		v := ""
-		switch val := (any(d.Value)).(type) {
-		case float64:
-			v = fmt.Sprintf("%f", val)
-		case int64:
-			v = fmt.Sprintf("%d", val)
-		default:
-			v = fmt.Sprintf("%v", val)
-		}
-		if d.Count == 0 {
-			result += fmt.Sprintf(`{"ts":"%s"}`, t)
-		} else {
-			result += fmt.Sprintf(`{"ts":"%s","value":%s}`, t, v)
-		}
+		result += d.String()
 	}
+	if len(ts.data) > 0 {
+		result += ","
+	}
+	result += fmt.Sprintf(`{"ts":"%s","value":%v}`,
+		ts.roundTime(ts.lastTime).Format(time.RFC3339),
+		ts.producer.Produce(false))
 	result += "]"
 	return result
 }
 
-type TimeSeriesSnapshot[T any] struct {
+type Snapshot struct {
 	Times    []time.Time
-	Values   []T
+	Values   []Product
 	Interval time.Duration
 	MaxCount int
+	Meta     any // Optional metadata that inherits from the TimeSeries meta
+}
+
+func (ss Snapshot) Field() (FieldInfo, bool) {
+	if ss.Meta == nil {
+		return FieldInfo{}, false
+	}
+	field, ok := ss.Meta.(FieldInfo)
+	return field, ok
 }
 
 // Snapshot creates a snapshot of the current time series data.
 // If snapshot is nil, it will create a new one.
 // The snapshot will contain rounded times and values.
-func (ts *TimeSeries[T]) Snapshot(snapshot *TimeSeriesSnapshot[T]) *TimeSeriesSnapshot[T] {
+func (ts *TimeSeries) Snapshot() *Snapshot {
 	ts.Lock()
 	defer ts.Unlock()
-	if snapshot == nil {
-		snapshot = &TimeSeriesSnapshot[T]{}
+	size := len(ts.data) + 1
+	snapshot := &Snapshot{
+		Times:    make([]time.Time, size),
+		Values:   make([]Product, size),
+		Interval: ts.interval,
+		MaxCount: ts.maxCount,
+		Meta:     ts.meta,
 	}
-	if len(snapshot.Times) != len(ts.data) {
-		snapshot.Times = make([]time.Time, len(ts.data))
-	}
-	if len(snapshot.Values) != len(ts.data) {
-		snapshot.Values = make([]T, len(ts.data))
-	}
-	snapshot.Interval = ts.interval
-	snapshot.MaxCount = ts.maxCount
 	for i, d := range ts.data {
-		if i == len(ts.data)-1 {
-			// Round the last time
-			snapshot.Times[i] = ts.roundTime(d.Time)
-		} else {
-			snapshot.Times[i] = d.Time
-		}
+		snapshot.Times[i] = d.Time
 		snapshot.Values[i] = d.Value
 	}
+	// snapshot for the current funnel state
+	lt := ts.roundTime(ts.lastTime)
+	lv := ts.producer.Produce(false)
+	snapshot.Times[size-1], snapshot.Values[size-1] = lt, lv
 	return snapshot
 }
 
-func (ts *TimeSeries[T]) Values() ([]time.Time, []T) {
-	ts.Lock()
-	defer ts.Unlock()
-	times := make([]time.Time, len(ts.data))
-	values := make([]T, len(ts.data))
-	for i, d := range ts.data {
-		times[i] = d.Time
-		values[i] = d.Value
-	}
-	times[len(times)-1] = ts.roundTime(times[len(times)-1]) // Round the last time
-	return times, values
-}
-
-func (ts *TimeSeries[T]) Last() (time.Time, T) {
+func (ts *TimeSeries) Last() (time.Time, Product) {
 	times, values := ts.LastN(1)
 	if len(times) == 0 {
-		return time.Time{}, *new(T)
+		return time.Time{}, *new(Product)
 	}
 	return times[0], values[0]
 }
 
-func (ts *TimeSeries[T]) LastN(n int) ([]time.Time, []T) {
+func (ts *TimeSeries) LastN(n int) ([]time.Time, []Product) {
 	ts.Lock()
 	defer ts.Unlock()
 	if len(ts.data) == 0 || n <= 0 {
 		return nil, nil
 	}
-	offset := len(ts.data) - n
+
+	lt := ts.roundTime(ts.lastTime)
+	lv := ts.producer.Produce(false)
+	if n == 1 {
+		return []time.Time{lt}, []Product{lv}
+	}
+
+	offset := len(ts.data) - n - 1
 	if offset < 0 {
 		offset = 0
 	}
 
 	sub := ts.data[offset:]
-	times := make([]time.Time, len(sub))
-	values := make([]T, len(sub))
+	times := make([]time.Time, len(sub)+1)
+	values := make([]Product, len(sub)+1)
 	for i := range sub {
 		times[i], values[i] = sub[i].Time, sub[i].Value
 	}
-	times[len(times)-1] = ts.roundTime(times[len(times)-1]) // Round the last time
+	times[len(times)-1], values[len(values)-1] = lt, lv
 	return times, values
 }
 
-func (ts *TimeSeries[T]) After(t time.Time) ([]time.Time, []T) {
+func (ts *TimeSeries) After(t time.Time) ([]time.Time, []Product) {
 	ts.Lock()
 	defer ts.Unlock()
 	idx := -1
@@ -178,112 +212,176 @@ func (ts *TimeSeries[T]) After(t time.Time) ([]time.Time, []T) {
 		return nil, nil
 	}
 	sub := ts.data[idx:]
-	times := make([]time.Time, len(sub))
-	values := make([]T, len(sub))
+	times := make([]time.Time, len(sub)+1)
+	values := make([]Product, len(sub)+1)
 	for i := range sub {
 		times[i], values[i] = sub[i].Time, sub[i].Value
 	}
-	times[len(times)-1] = ts.roundTime(times[len(times)-1]) // Round the last time
+	lt := ts.roundTime(ts.lastTime)
+	lv := ts.producer.Produce(false)
+	times[len(times)-1], values[len(values)-1] = lt, lv
 	return times, values
 }
 
-func (ts *TimeSeries[T]) Add(v T) {
+func (ts *TimeSeries) Add(v float64) {
 	ts.Lock()
 	defer ts.Unlock()
-	ts.addPoint(TimePoint[T]{Time: nowFunc(), Value: v, Count: 1})
+	ts.add(nowFunc(), v)
 }
 
-func (ts *TimeSeries[T]) AddTime(t time.Time, v T) {
+func (ts *TimeSeries) AddTime(t time.Time, v float64) {
 	ts.Lock()
 	defer ts.Unlock()
-	ts.addPoint(TimePoint[T]{Time: t, Value: v, Count: 1})
+	ts.add(t, v)
 }
 
-func (ts *TimeSeries[T]) addPoint(datum TimePoint[T]) {
-	if len(ts.data) == 0 {
-		ts.data = append(ts.data, datum)
+func (ts *TimeSeries) add(tm time.Time, val float64) {
+	roll := ts.IntervalBetween(ts.lastTime, tm)
+
+	if roll <= 0 || ts.lastTime.IsZero() {
+		ts.lastTime = tm
+		ts.producer.Add(val)
 		return
 	}
+
+	p := ts.producer.Produce(true)
+	ts.data = append(ts.data, TimeBin{Time: ts.roundTime(ts.lastTime), Value: p})
+	ts.lastTime = tm
+	ts.producer.Add(val)
+	roll--
+
+	// Reset if the gap is too large
+	if roll >= ts.maxCount-1 {
+		ts.data = ts.data[:0]
+		return
+	}
+	// Remove the oldest data if we exceed maxCount
+	if len(ts.data) > ts.maxCount-1 {
+		ts.data = ts.data[len(ts.data)-(ts.maxCount-1):]
+	}
+
 	last := ts.data[len(ts.data)-1]
-
-	roll := ts.IntervalBetween(last.Time, datum.Time)
-
-	if roll <= 0 {
-		if ts.aggregator == nil {
-			// Replace the last point
-			ts.data[len(ts.data)-1] = datum
-		} else {
-			// If the new datum is within the same interval, aggregate it
-			ts.data[len(ts.data)-1] = ts.aggregator(last, datum)
-		}
-		return
-	}
-
-	if roll >= ts.maxCount {
-		ts.data = ts.data[:0] // Reset if the gap is too large
-		ts.data = append(ts.data, datum)
-		return
-	}
-
 	for i := range roll {
-		// Remove the oldest data if we exceed maxCount
-		if len(ts.data) >= ts.maxCount {
-			ts.data = ts.data[len(ts.data)-ts.maxCount+1:]
+		// Fill in the gaps with empty data points
+		emptyPoint := TimeBin{
+			Time:   last.Time.Add(time.Duration(i+1) * ts.interval),
+			IsNull: true,
 		}
-		if i == roll-1 {
-			ts.data[len(ts.data)-1].Time = ts.roundTime(ts.data[len(ts.data)-1].Time)
-			// Add the new datum at the end of the series
-			ts.data = append(ts.data, datum)
-		} else {
-			// Fill in the gaps with empty data points
-			emptyPoint := TimePoint[T]{
-				Time: last.Time.Add(time.Duration(i+1) * ts.interval),
-			}
-			ts.data = append(ts.data, emptyPoint)
+		ts.data = append(ts.data, emptyPoint)
+		// Remove the oldest data if we exceed maxCount
+		if len(ts.data) > ts.maxCount-1 {
+			ts.data = ts.data[1:]
 		}
 	}
 }
 
 // IntervalBetween returns the number of intervals between two times.
 // (later - prev) / ts.interval
-func (ts *TimeSeries[T]) IntervalBetween(prev, later time.Time) int {
+func (ts *TimeSeries) IntervalBetween(prev, later time.Time) int {
 	return int(ts.timeRound(later).Sub(ts.timeRound(prev)) / ts.interval)
 }
 
-// IntervalFromLast returns the number of intervals between the last recorded time and a given time.
-func (ts *TimeSeries[T]) IntervalFromLast(t time.Time) int {
-	if len(ts.data) == 0 {
-		return 0
-	}
-	last := ts.data[len(ts.data)-1].Time
-	return ts.IntervalBetween(last, t)
-}
-
-func (ts *TimeSeries[T]) timeRound(t time.Time) time.Time {
+func (ts *TimeSeries) timeRound(t time.Time) time.Time {
 	return t.Truncate(ts.interval)
 }
 
-type MultiTimeSeries[T any] []*TimeSeries[T]
+func (ts *TimeSeries) MarshalJSON() ([]byte, error) {
+	ts.Lock()
+	defer ts.Unlock()
+	buf := &bytes.Buffer{}
+	buf.WriteString(`{"data":[`)
+	for i, d := range ts.data {
+		if i > 0 {
+			buf.WriteString(",")
+		}
+		dd, err := json.Marshal(d)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal time bin %d: %w", i, err)
+		}
+		buf.Write(dd)
+	}
+	buf.WriteString("]")
+	buf.WriteString(fmt.Sprintf(`,"interval":%d`, ts.interval))
+	buf.WriteString(fmt.Sprintf(`,"maxCount":%d`, ts.maxCount))
+	buf.WriteString(fmt.Sprintf(`,"lastTime":%d`, ts.lastTime.UnixNano()))
+	buf.WriteString(fmt.Sprintf(`,"type":"%T"`, ts.producer))
+	buf.WriteString(`,"producer":`)
+	pb, err := json.Marshal(ts.producer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal producer: %w", err)
+	}
+	buf.Write(pb)
+	buf.WriteString("}")
+	return buf.Bytes(), nil
+}
 
-func (mts MultiTimeSeries[T]) Add(v T) {
+func (ts *TimeSeries) UnmarshalJSON(data []byte) error {
+	ts.Lock()
+	defer ts.Unlock()
+	obj := struct {
+		Data     []TimeBin      `json:"data"`
+		LastTime int64          `json:"lastTime"`
+		Interval int64          `json:"interval"`
+		MaxCount int            `json:"maxCount"`
+		Type     string         `json:"type"`
+		Producer map[string]any `json:"producer,omitempty"`
+	}{}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return err
+	}
+	ts.data = obj.Data
+	if obj.Interval > 0 {
+		ts.interval = time.Duration(obj.Interval)
+	}
+	if obj.MaxCount > 0 {
+		ts.maxCount = obj.MaxCount
+	}
+	ts.lastTime = time.Unix(0, obj.LastTime).In(time.Local)
+	var producer Producer
+	switch obj.Type {
+	case "*metric.Meter":
+		producer = &Meter{}
+	case "*metric.Counter":
+		producer = &Counter{}
+	case "*metric.Gauge":
+		producer = &Gauge{}
+	case "*metric.Histogram":
+		producer = &Histogram{}
+	default:
+		return fmt.Errorf("unknown producer type %s", obj.Type)
+	}
+	b, err := json.Marshal(obj.Producer)
+	if err != nil {
+		return fmt.Errorf("failed to marshal producer data: %w", err)
+	}
+	if err := producer.UnmarshalJSON(b); err != nil {
+		return fmt.Errorf("failed to unmarshal producer: %w", err)
+	}
+	ts.producer = producer
+	return nil
+}
+
+type MultiTimeSeries []*TimeSeries
+
+func (mts MultiTimeSeries) Add(v float64) {
 	for _, ts := range mts {
 		ts.Add(v)
 	}
 }
 
-func (mts MultiTimeSeries[T]) AddTime(t time.Time, v T) {
+func (mts MultiTimeSeries) AddTime(t time.Time, v float64) {
 	for _, ts := range mts {
 		ts.AddTime(t, v)
 	}
 }
 
-func (mts *MultiTimeSeries[T]) SetMeta(meta *TimeSeriesMeta) {
+func (mts *MultiTimeSeries) SetMeta(meta any) {
 	for _, ts := range *mts {
 		ts.SetMeta(meta)
 	}
 }
 
-func (mts MultiTimeSeries[T]) String() string {
+func (mts MultiTimeSeries) String() string {
 	if len(mts) == 0 {
 		return "[]"
 	}
@@ -296,67 +394,4 @@ func (mts MultiTimeSeries[T]) String() string {
 	}
 	result += "]"
 	return result
-}
-
-type Aggregator[T any] func(l, r TimePoint[T]) TimePoint[T]
-
-//////////////////////////////////////////////////////////
-// Some common aggregators
-// SUM, AVG, LAST, FIRST, MIN, MAX
-
-func SUM[T ValueType](l, r TimePoint[T]) TimePoint[T] {
-	ts := r.Time
-	if l.Time.After(r.Time) { // Ensure l is after r
-		ts = l.Time
-	}
-	return TimePoint[T]{
-		Time:  ts,
-		Value: l.Value + r.Value,
-		Count: l.Count + r.Count,
-	}
-}
-
-func AVG[T ValueType](l, r TimePoint[T]) TimePoint[T] {
-	ts := r.Time
-	if l.Time.After(r.Time) { // Ensure l is after r
-		ts = l.Time
-	}
-	totalCount := l.Count + r.Count
-	if totalCount == 0 {
-		return TimePoint[T]{Time: ts}
-	}
-	value := ((float64(l.Value) * float64(l.Count)) + (float64(r.Value) * float64(r.Count))) / float64(totalCount)
-	return TimePoint[T]{
-		Time:  ts,
-		Value: T(value),
-		Count: totalCount,
-	}
-}
-
-func LAST[T any](l, r TimePoint[T]) TimePoint[T] {
-	if l.Time.After(r.Time) {
-		return l
-	}
-	return r
-}
-
-func FIRST[T any](l, r TimePoint[T]) TimePoint[T] {
-	if l.Time.Before(r.Time) {
-		return l
-	}
-	return r
-}
-
-func MIN[T ValueType](l, r TimePoint[T]) TimePoint[T] {
-	if l.Value < r.Value {
-		return l
-	}
-	return r
-}
-
-func MAX[T ValueType](l, r TimePoint[T]) TimePoint[T] {
-	if l.Value > r.Value {
-		return l
-	}
-	return r
 }

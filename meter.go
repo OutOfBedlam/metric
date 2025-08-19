@@ -1,114 +1,100 @@
 package metric
 
 import (
-	"strconv"
+	"encoding/json"
 	"sync"
 )
 
-var _ Value[float64] = (*Meter)(nil)
+func NewMeter() *Meter {
+	return &Meter{}
+}
 
-type MeterExtendPoint int
-
-const (
-	MeterExtendValue MeterExtendPoint = iota
-	MeterExtendMin
-	MeterExtendMax
-	MeterExtendSum
-	MeterExtendCount
-	MeterExtendAvg
-)
+var _ Producer = (*Meter)(nil)
 
 type Meter struct {
 	sync.Mutex
-	value float64
+	first float64
+	last  float64
 	min   float64
 	max   float64
 	sum   float64
-	count int64
-	exts  map[MeterExtendPoint]Extension
+	count float64
 }
 
-func (m *Meter) Extend(point MeterExtendPoint, ext Extension) {
-	m.Lock()
-	defer m.Unlock()
-	if m.exts == nil {
-		m.exts = make(map[MeterExtendPoint]Extension)
+func (m *Meter) MarshalJSON() ([]byte, error) {
+	return json.Marshal(m.Produce(false))
+}
+
+func (m *Meter) UnmarshalJSON(data []byte) error {
+	p := &MeterProduct{}
+	if err := json.Unmarshal(data, p); err != nil {
+		return err
 	}
-	if ext == nil {
-		delete(m.exts, point)
-		return
+	m.first = p.First
+	m.last = p.Last
+	m.min = p.Min
+	m.max = p.Max
+	m.sum = p.Sum
+	m.count = float64(p.Count)
+	return nil
+}
+
+func (m *Meter) Add(v float64) {
+	m.Lock()
+	defer m.Unlock()
+	if m.count == 0 {
+		m.first = v
+		m.min = v
+		m.max = v
 	}
-	m.exts[point] = ext
-}
-
-func (m *Meter) String() string {
-	return strconv.FormatFloat(m.Value(), 'g', -1, 64)
-}
-
-func (m *Meter) Value() float64 {
-	m.Lock()
-	defer m.Unlock()
-	return m.value
-}
-
-type MeterSnapshot struct {
-	Value float64 `json:"value"`
-	Count int64   `json:"count"`
-	Sum   float64 `json:"sum"`
-	Min   float64 `json:"min"`
-	Max   float64 `json:"max"`
-}
-
-func (m *Meter) Snapshot() MeterSnapshot {
-	m.Lock()
-	defer m.Unlock()
-	return MeterSnapshot{
-		Value: m.value,
-		Count: m.count,
-		Sum:   m.sum,
-		Min:   m.min,
-		Max:   m.max,
-	}
-}
-
-func (m *Meter) Mark(v float64) {
-	m.Lock()
-	defer m.Unlock()
-	m.value = v
-	m.sum += v
-	m.count++
-	if m.count == 1 || v < m.min {
+	if v < m.min {
 		m.min = v
 	}
 	if v > m.max {
 		m.max = v
 	}
-	for point, ext := range m.exts {
-		switch point {
-		case MeterExtendValue:
-			ext.Add(v)
-		case MeterExtendMin:
-			ext.Add(m.min)
-		case MeterExtendMax:
-			ext.Add(m.max)
-		case MeterExtendSum:
-			ext.Add(m.sum)
-		case MeterExtendCount:
-			ext.Add(float64(m.count))
-		case MeterExtendAvg:
-			ext.Add(m.sum / float64(m.count))
-		default:
-			panic("unknown meter adder point: " + strconv.Itoa(int(point)))
-		}
-	}
+	m.sum += v
+	m.last = v
+	m.count++
 }
 
-func (m *Meter) Reset() {
+func (m *Meter) Produce(reset bool) Product {
 	m.Lock()
 	defer m.Unlock()
-	m.value = 0
-	m.min = 0
-	m.max = 0
-	m.sum = 0
-	m.count = 0
+	ret := &MeterProduct{
+		Count: int64(m.count),
+		First: float64(m.first),
+		Last:  float64(m.last),
+		Min:   float64(m.min),
+		Max:   float64(m.max),
+		Sum:   float64(m.sum),
+	}
+	if reset {
+		m.first = 0
+		m.last = 0
+		m.min = 0
+		m.max = 0
+		m.sum = 0
+		m.count = 0
+	}
+	return ret
+}
+
+func (m *Meter) String() string {
+	b, _ := json.Marshal(m.Produce(false))
+	return string(b)
+}
+
+type MeterProduct struct {
+	Count int64   `json:"count"`
+	Sum   float64 `json:"sum"`
+	First float64 `json:"first"`
+	Last  float64 `json:"last"`
+	Min   float64 `json:"min"`
+	Max   float64 `json:"max"`
+}
+
+func (mp *MeterProduct) String() string {
+	b, _ := json.Marshal(mp)
+	return string(b)
 }
