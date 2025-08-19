@@ -16,9 +16,9 @@ type TimeBin struct {
 
 func (tv TimeBin) String() string {
 	if ((any)(tv.Value)) == nil {
-		return fmt.Sprintf(`{"ts":"%s",isNull:%t}`, tv.Time.Format(time.RFC3339), tv.IsNull)
+		return fmt.Sprintf(`{"ts":"%s",isNull:%t}`, tv.Time.In(time.Local).Format(time.DateTime), tv.IsNull)
 	}
-	return fmt.Sprintf(`{"ts":"%s","value":%s}`, tv.Time.Format(time.RFC3339), tv.Value.String())
+	return fmt.Sprintf(`{"ts":"%s","value":%s}`, tv.Time.In(time.Local).Format(time.DateTime), tv.Value.String())
 }
 
 func (tv TimeBin) MarshalJSON() ([]byte, error) {
@@ -114,7 +114,7 @@ func (ts *TimeSeries) String() string {
 		result += ","
 	}
 	result += fmt.Sprintf(`{"ts":"%s","value":%v}`,
-		ts.roundTime(ts.lastTime).Format(time.RFC3339),
+		ts.roundTime(ts.lastTime).In(time.Local).Format(time.DateTime),
 		ts.producer.Produce(false))
 	result += "]"
 	return result

@@ -84,8 +84,7 @@ type Collector struct {
 	expvarPrefix string
 
 	// persistent storage
-	storage   Storage
-	storageCh chan struct{}
+	storage Storage
 }
 
 type CollectorSeries struct {
@@ -100,10 +99,9 @@ type CollectorSeries struct {
 // It is safe to call Start() multiple times, but Stop() should be called only once
 func NewCollector(interval time.Duration, opts ...CollectorOption) *Collector {
 	c := &Collector{
-		interval:  interval,
-		closeCh:   make(chan struct{}),
-		emitters:  make(map[string]*EmitterWrapper),
-		storageCh: make(chan struct{}, 1),
+		interval: interval,
+		closeCh:  make(chan struct{}),
+		emitters: make(map[string]*EmitterWrapper),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -165,10 +163,9 @@ func (c *Collector) Start() {
 			select {
 			case tm := <-ticker.C:
 				c.runInputs(tm)
+				c.syncStorage()
 			case m := <-c.recvCh:
 				c.receive(m)
-			case <-c.storageCh:
-				c.syncStorage()
 			case <-c.closeCh:
 				ticker.Stop()
 				return
@@ -211,9 +208,6 @@ func (c *Collector) runInputs(tm time.Time) {
 			}
 			mts.AddTime(tm, field.Value)
 		}
-	}
-	if c.storage != nil {
-		c.storageCh <- struct{}{}
 	}
 }
 
@@ -264,9 +258,6 @@ func (c *Collector) receive(m Measurement) {
 			emit.publishedNames[field.Name] = publishName
 		}
 		mts.AddTime(now, field.Value)
-	}
-	if c.storage != nil {
-		c.storageCh <- struct{}{}
 	}
 }
 
@@ -348,7 +339,6 @@ func (c *Collector) syncStorage() {
 				}
 			}
 		}
-
 	}()
 
 	func() {
@@ -378,7 +368,7 @@ type OutputWrapper struct {
 }
 
 type Exporter struct {
-	owsMutex  sync.Mutex
+	sync.Mutex
 	ows       []OutputWrapper
 	metrics   []string
 	interval  time.Duration
@@ -395,8 +385,8 @@ func NewExporter(interval time.Duration, metrics []string) *Exporter {
 }
 
 func (s *Exporter) AddOutput(output Output, filter any) {
-	s.owsMutex.Lock()
-	defer s.owsMutex.Unlock()
+	s.Lock()
+	defer s.Unlock()
 	ow := OutputWrapper{
 		output: output,
 		filter: func(string) bool { return true }, // Default filter allows all metrics

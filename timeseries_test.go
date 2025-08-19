@@ -19,8 +19,8 @@ func TestTimeseries(t *testing.T) {
 	ts.Add(2.0)
 
 	require.JSONEq(t, `[`+
-		`{"ts":"2023-10-01T12:04:05Z","value":{"count":1,"max":1,"min":1,"first":1,"last":1,"sum":1}},`+
-		`{"ts":"2023-10-01T12:04:06Z","value":{"count":1,"max":2,"min":2,"first":2,"last":2,"sum":2}}`+
+		`{"ts":"2023-10-01 21:04:05","value":{"count":1,"max":1,"min":1,"first":1,"last":1,"sum":1}},`+
+		`{"ts":"2023-10-01 21:04:06","value":{"count":1,"max":2,"min":2,"first":2,"last":2,"sum":2}}`+
 		`]`, ts.String())
 
 	now = now.Add(time.Second)
@@ -78,7 +78,7 @@ func TestTimeseries(t *testing.T) {
 	ts.Add(7.0)
 
 	require.JSONEq(t, `[`+
-		`{"ts":"2023-10-01T12:04:15Z","value":{"count":1,"max":7,"min":7,"first":7,"last":7,"sum":7}}`+
+		`{"ts":"2023-10-01 21:04:15","value":{"count":1,"max":7,"min":7,"first":7,"last":7,"sum":7}}`+
 		`]`, ts.String())
 }
 
@@ -97,16 +97,16 @@ func TestTimeSeriesSubSeconds(t *testing.T) {
 	}
 
 	require.JSONEq(t, `[`+
-		`{"ts":"2023-10-01T12:04:06Z","value":{"value":55,"count":10}},`+
-		`{"ts":"2023-10-01T12:04:07Z","value":{"value":155,"count":10}},`+
-		`{"ts":"2023-10-01T12:04:08Z","value":{"value":255,"count":10}},`+
-		`{"ts":"2023-10-01T12:04:09Z","value":{"value":355,"count":10}},`+
-		`{"ts":"2023-10-01T12:04:10Z","value":{"value":455,"count":10}},`+
-		`{"ts":"2023-10-01T12:04:11Z","value":{"value":555,"count":10}},`+
-		`{"ts":"2023-10-01T12:04:12Z","value":{"value":655,"count":10}},`+
-		`{"ts":"2023-10-01T12:04:13Z","value":{"value":755,"count":10}},`+
-		`{"ts":"2023-10-01T12:04:14Z","value":{"value":855,"count":10}},`+
-		`{"ts":"2023-10-01T12:04:15Z","value":{"value":955,"count":10}}`+
+		`{"ts":"2023-10-01 21:04:06","value":{"value":55,"count":10}},`+
+		`{"ts":"2023-10-01 21:04:07","value":{"value":155,"count":10}},`+
+		`{"ts":"2023-10-01 21:04:08","value":{"value":255,"count":10}},`+
+		`{"ts":"2023-10-01 21:04:09","value":{"value":355,"count":10}},`+
+		`{"ts":"2023-10-01 21:04:10","value":{"value":455,"count":10}},`+
+		`{"ts":"2023-10-01 21:04:11","value":{"value":555,"count":10}},`+
+		`{"ts":"2023-10-01 21:04:12","value":{"value":655,"count":10}},`+
+		`{"ts":"2023-10-01 21:04:13","value":{"value":755,"count":10}},`+
+		`{"ts":"2023-10-01 21:04:14","value":{"value":855,"count":10}},`+
+		`{"ts":"2023-10-01 21:04:15","value":{"value":955,"count":10}}`+
 		`]`, ts.String())
 
 	ss := ts.Snapshot()
@@ -408,7 +408,7 @@ func createTestStorage(t *testing.T) *FileStorage {
 
 func TestTimeseriesStorage(t *testing.T) {
 	storage := createTestStorage(t)
-	now := time.Date(2023, 10, 1, 12, 4, 4, 0, time.UTC)
+	now := time.Date(2023, 10, 1, 12, 4, 4, 0, time.Local)
 	nowFunc = func() time.Time { return now }
 
 	ts := NewTimeSeries(time.Second, 3, NewMeter())
@@ -418,8 +418,8 @@ func TestTimeseriesStorage(t *testing.T) {
 	ts.Add(2.0)
 
 	require.JSONEq(t, `[`+
-		`{"ts":"2023-10-01T12:04:05Z","value":{"count":1,"max":1,"min":1,"first":1,"last":1,"sum":1}},`+
-		`{"ts":"2023-10-01T12:04:06Z","value":{"count":1,"max":2,"min":2,"first":2,"last":2,"sum":2}}`+
+		`{"ts":"2023-10-01 12:04:05","value":{"count":1,"max":1,"min":1,"first":1,"last":1,"sum":1}},`+
+		`{"ts":"2023-10-01 12:04:06","value":{"count":1,"max":2,"min":2,"first":2,"last":2,"sum":2}}`+
 		`]`, ts.String())
 
 	err := storage.Store("test_measure", "test_field", "3s", ts)
@@ -429,7 +429,7 @@ func TestTimeseriesStorage(t *testing.T) {
 	require.NoError(t, err)
 
 	require.JSONEq(t, `[`+
-		`{"ts":"2023-10-01T12:04:05Z","value":{"count":1,"max":1,"min":1,"first":1,"last":1,"sum":1}},`+
-		`{"ts":"2023-10-01T12:04:06Z","value":{"count":1,"max":2,"min":2,"first":2,"last":2,"sum":2}}`+
+		`{"ts":"2023-10-01 12:04:05","value":{"count":1,"max":1,"min":1,"first":1,"last":1,"sum":1}},`+
+		`{"ts":"2023-10-01 12:04:06","value":{"count":1,"max":2,"min":2,"first":2,"last":2,"sum":2}}`+
 		`]`, loaded.String())
 }
