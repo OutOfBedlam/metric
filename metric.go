@@ -47,10 +47,11 @@ func FieldTypeHistogram(maxBin int, ps ...float64) func() Producer {
 }
 
 type FieldInfo struct {
-	Name   string
-	Series string
-	Type   MakeProducerFunc
-	Unit   Unit
+	Measure string
+	Name    string
+	Series  string
+	Type    MakeProducerFunc
+	Unit    Unit
 }
 
 type InputWrapper struct {
@@ -91,6 +92,7 @@ type CollectorSeries struct {
 	name     string
 	period   time.Duration
 	maxCount int
+	lsnr     func(TimeBin, any)
 }
 
 // NewCollector creates a new Collector with the specified interval.
@@ -116,8 +118,12 @@ func NewCollector(interval time.Duration, opts ...CollectorOption) *Collector {
 type CollectorOption func(c *Collector)
 
 func WithSeries(name string, period time.Duration, maxCount int) CollectorOption {
+	return WithSeriesListener(name, period, maxCount, nil)
+}
+
+func WithSeriesListener(name string, period time.Duration, maxCount int, lsnr func(TimeBin, any)) CollectorOption {
 	return func(c *Collector) {
-		c.series = append(c.series, CollectorSeries{name: name, period: period, maxCount: maxCount})
+		c.series = append(c.series, CollectorSeries{name: name, period: period, maxCount: maxCount, lsnr: lsnr})
 	}
 }
 
@@ -265,6 +271,14 @@ func (c *Collector) makeMultiTimeSeries(measureName string, field Field) MultiTi
 	mts := make(MultiTimeSeries, len(c.series))
 	for i, ser := range c.series {
 		var ts = NewTimeSeries(ser.period, ser.maxCount, field.Type())
+		ts.SetListener(ser.lsnr)
+		ts.SetMeta(FieldInfo{
+			Measure: measureName,
+			Name:    field.Name,
+			Series:  ser.name,
+			Type:    field.Type,
+			Unit:    field.Unit,
+		})
 		if c.storage != nil {
 			seriesName := cleanPath(ts.interval.String())
 			if data, err := c.storage.Load(measureName, field.Name, seriesName); err != nil {
@@ -275,12 +289,6 @@ func (c *Collector) makeMultiTimeSeries(measureName string, field Field) MultiTi
 			}
 		}
 		mts[i] = ts
-		mts[i].SetMeta(FieldInfo{
-			Name:   field.Name,
-			Series: ser.name,
-			Type:   field.Type,
-			Unit:   field.Unit,
-		})
 	}
 	return mts
 }

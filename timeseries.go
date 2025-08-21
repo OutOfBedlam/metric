@@ -75,6 +75,7 @@ type TimeSeries struct {
 	interval time.Duration
 	maxCount int
 	meta     any // Optional metadata for the time series
+	lsnr     func(TimeBin, any)
 }
 
 // If aggregator is nil, it will replace the last point with the new one.
@@ -90,6 +91,10 @@ func NewTimeSeries(interval time.Duration, maxCount int, prod Producer) *TimeSer
 
 func (ts *TimeSeries) roundTime(t time.Time) time.Time {
 	return t.Add(ts.interval / 2).Round(ts.interval)
+}
+
+func (ts *TimeSeries) SetListener(listener func(TimeBin, any)) {
+	ts.lsnr = listener
 }
 
 func (ts *TimeSeries) SetMeta(meta any) {
@@ -245,7 +250,11 @@ func (ts *TimeSeries) add(tm time.Time, val float64) {
 	}
 
 	p := ts.producer.Produce(true)
-	ts.data = append(ts.data, TimeBin{Time: ts.roundTime(ts.lastTime), Value: p})
+	tb := TimeBin{Time: ts.roundTime(ts.lastTime), Value: p, IsNull: p == nil}
+	if ts.lsnr != nil {
+		ts.lsnr(tb, ts.meta)
+	}
+	ts.data = append(ts.data, tb)
 	ts.lastTime = tm
 	ts.producer.Add(val)
 	roll--
@@ -372,12 +381,6 @@ func (mts MultiTimeSeries) Add(v float64) {
 func (mts MultiTimeSeries) AddTime(t time.Time, v float64) {
 	for _, ts := range mts {
 		ts.AddTime(t, v)
-	}
-}
-
-func (mts *MultiTimeSeries) SetMeta(meta any) {
-	for _, ts := range *mts {
-		ts.SetMeta(meta)
 	}
 }
 
