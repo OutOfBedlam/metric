@@ -121,9 +121,19 @@ func WithSeries(name string, period time.Duration, maxCount int) CollectorOption
 	return WithSeriesListener(name, period, maxCount, nil)
 }
 
-func WithSeriesListener(name string, period time.Duration, maxCount int, lsnr func(TimeBin, any)) CollectorOption {
+func WithSeriesListener(name string, period time.Duration, maxCount int, lsnr func(TimeBin, FieldInfo)) CollectorOption {
 	return func(c *Collector) {
-		c.series = append(c.series, CollectorSeries{name: name, period: period, maxCount: maxCount, lsnr: lsnr})
+		var productLsnr func(tb TimeBin, meta any)
+		if lsnr != nil {
+			productLsnr = func(tb TimeBin, meta any) {
+				field, ok := meta.(FieldInfo)
+				if !ok {
+					return
+				}
+				lsnr(tb, field)
+			}
+		}
+		c.series = append(c.series, CollectorSeries{name: name, period: period, maxCount: maxCount, lsnr: productLsnr})
 	}
 }
 
