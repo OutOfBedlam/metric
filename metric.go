@@ -56,13 +56,13 @@ type FieldInfo struct {
 type InputWrapper struct {
 	input          InputFunc
 	measureName    string
-	mtsFields      map[string]MetricTimeSeries
+	mtsFields      map[string]MultiTimeSeries
 	publishedNames map[string]string
 }
 
 type EmitterWrapper struct {
 	measureName    string
-	mtsFields      map[string]MetricTimeSeries
+	mtsFields      map[string]MultiTimeSeries
 	publishedNames map[string]string
 }
 
@@ -148,7 +148,7 @@ func (c *Collector) AddInputFunc(input InputFunc) {
 	defer c.Unlock()
 	iw := &InputWrapper{
 		input:          input,
-		mtsFields:      make(map[string]MetricTimeSeries),
+		mtsFields:      make(map[string]MultiTimeSeries),
 		publishedNames: make(map[string]string),
 	}
 	c.inputs = append(c.inputs, iw)
@@ -195,7 +195,7 @@ func (c *Collector) runInputs(tm time.Time) {
 			iw.measureName = measure.Name
 		}
 		for _, field := range measure.Fields {
-			var mts MetricTimeSeries
+			var mts MultiTimeSeries
 			if fm, exists := iw.mtsFields[field.Name]; exists {
 				mts = fm
 			} else {
@@ -203,7 +203,7 @@ func (c *Collector) runInputs(tm time.Time) {
 				iw.mtsFields[field.Name] = mts
 
 				publishName := c.makePublishName(measure.Name, field.Name)
-				expvar.Publish(publishName, MetricTimeSeries(mts))
+				expvar.Publish(publishName, MultiTimeSeries(mts))
 				iw.publishedNames[field.Name] = publishName
 			}
 			mts.AddTime(tm, field.Value)
@@ -240,13 +240,13 @@ func (c *Collector) receive(m Measurement) {
 	if !ok {
 		emit = &EmitterWrapper{
 			measureName:    m.Name,
-			mtsFields:      make(map[string]MetricTimeSeries),
+			mtsFields:      make(map[string]MultiTimeSeries),
 			publishedNames: make(map[string]string),
 		}
 		c.emitters[m.Name] = emit
 	}
 	for _, field := range m.Fields {
-		var mts MetricTimeSeries
+		var mts MultiTimeSeries
 		if fm, exists := emit.mtsFields[field.Name]; exists {
 			mts = fm
 		} else {
@@ -254,14 +254,14 @@ func (c *Collector) receive(m Measurement) {
 			emit.mtsFields[field.Name] = mts
 
 			publishName := c.makePublishName(m.Name, field.Name)
-			expvar.Publish(publishName, MetricTimeSeries(mts))
+			expvar.Publish(publishName, MultiTimeSeries(mts))
 			emit.publishedNames[field.Name] = publishName
 		}
 		mts.AddTime(now, field.Value)
 	}
 }
 
-func (c *Collector) makeMultiTimeSeries(measureName string, field Field) MetricTimeSeries {
+func (c *Collector) makeMultiTimeSeries(measureName string, field Field) MultiTimeSeries {
 	mts := make(MultiTimeSeries, len(c.series))
 	for i, ser := range c.series {
 		var ts = NewTimeSeries(ser.period, ser.maxCount, field.Type())
@@ -282,17 +282,7 @@ func (c *Collector) makeMultiTimeSeries(measureName string, field Field) MetricT
 			Unit:   field.Unit,
 		})
 	}
-	return MetricTimeSeries(mts)
-}
-
-type MetricTimeSeries MultiTimeSeries
-
-func (mts MetricTimeSeries) AddTime(t time.Time, v float64) {
-	MultiTimeSeries(mts).AddTime(t, v)
-}
-
-func (mts MetricTimeSeries) String() string {
-	return MultiTimeSeries(mts).String()
+	return mts
 }
 
 func (c *Collector) Names() []string {
@@ -464,13 +454,9 @@ func (s *Exporter) Export(metricName string, tsIdx int) error {
 
 func snapshot(metricName string, idx int) (*Snapshot, error) {
 	if ev := expvar.Get(metricName); ev != nil {
-		mts, ok := ev.(MetricTimeSeries)
+		mts, ok := ev.(MultiTimeSeries)
 		if !ok {
-			multiTs, ok := ev.(MultiTimeSeries)
-			if !ok {
-				return nil, fmt.Errorf("metric %s is not a Metric, but %T", metricName, ev)
-			}
-			mts = MetricTimeSeries(multiTs)
+			return nil, fmt.Errorf("metric %s is not a Metric, but %T", metricName, ev)
 		}
 		if idx < 0 || idx >= len(mts) {
 			return nil, fmt.Errorf("index %d out of range for metric %s with %d time series",
