@@ -175,6 +175,7 @@ func (c *Collector) Start() {
 	c.stopWg.Add(1)
 	go func() {
 		defer c.stopWg.Done()
+		c.runInputs(time.Now()) // initial run
 		for {
 			select {
 			case tm := <-ticker.C:
@@ -219,7 +220,7 @@ func (c *Collector) runInputs(tm time.Time) {
 				iw.mtsFields[field.Name] = mts
 
 				publishName := c.makePublishName(measure.Name, field.Name)
-				expvar.Publish(publishName, MultiTimeSeries(mts))
+				expvar.Publish(publishName, mts)
 				iw.publishedNames[field.Name] = publishName
 			}
 			mts.AddTime(tm, field.Value)
