@@ -17,12 +17,21 @@ func TestMetric(t *testing.T) {
 	}
 	var wg sync.WaitGroup
 	var out string
-	wg.Add(1)
+	var cnt int
+	wg.Add(3)
 	c := NewCollector(
 		WithCollectInterval(time.Second),
-		WithSeriesListener("1m/1s", time.Second, 60, func(tb TimeBin, fi FieldInfo) {
-			out = fmt.Sprintf("TimeBin: %v, FieldInfo: %s:%s", tb, fi.Measure, fi.Name)
-			wg.Done()
+		WithSeriesListener("1m/1s", time.Second, 60, func(pd ProducedData) {
+			defer wg.Done()
+			out = fmt.Sprintf("%s:%s %s %v %s %s",
+				pd.Measure, pd.Field, pd.Series, pd.Time.Format(time.TimeOnly), pd.Value.String(), pd.Type)
+			if cnt++; cnt == 1 {
+				require.Equal(t, `m1:f1 1m/1s 08:38:37 {"samples":1,"value":1} counter`, out)
+			} else if cnt == 2 {
+				require.Equal(t, `m1:f1 1m/1s 08:38:38 {"samples":1,"value":1} counter`, out)
+			} else if cnt == 3 {
+				require.Equal(t, `m1:f1 1m/1s 08:38:39 {"samples":1,"value":1} counter`, out)
+			}
 		}),
 	)
 	c.AddInputFunc(func() (Measurement, error) {
@@ -32,6 +41,5 @@ func TestMetric(t *testing.T) {
 	})
 	c.Start()
 	wg.Wait()
-	require.Equal(t, `TimeBin: {"ts":"2025-08-27 08:38:37","value":{"samples":1,"value":1}}, FieldInfo: m1:f1`, out)
 	c.Stop()
 }

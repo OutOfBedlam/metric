@@ -31,26 +31,37 @@ type Field struct {
 	Name  string
 	Value float64
 	Unit  Unit
-	Type  MakeProducerFunc
+	Type  FieldType
 }
 
-type MakeProducerFunc func() Producer
+type FieldType struct {
+	p Producer
+	s string
+}
 
-func FieldTypeCounter() Producer { return NewCounter() }
-func FieldTypeGauge() Producer   { return NewGauge() }
-func FieldTypeMeter() Producer   { return NewMeter() }
+func (ft FieldType) Producer() Producer {
+	return ft.p
+}
 
-func FieldTypeHistogram(maxBin int, ps ...float64) func() Producer {
-	return func() Producer {
-		return NewHistogram(maxBin, ps...)
-	}
+func (ft FieldType) String() string {
+	return ft.s
+}
+
+var (
+	FieldTypeCounter = FieldType{p: NewCounter(), s: "counter"}
+	FieldTypeGauge   = FieldType{p: NewGauge(), s: "gauge"}
+	FieldTypeMeter   = FieldType{p: NewMeter(), s: "meter"}
+)
+
+func FieldTypeHistogram(maxBin int, ps ...float64) FieldType {
+	return FieldType{p: NewHistogram(maxBin, ps...), s: "histogram"}
 }
 
 type FieldInfo struct {
 	Measure string
 	Name    string
 	Series  string
-	Type    MakeProducerFunc
+	Type    string
 	Unit    Unit
 }
 
@@ -127,7 +138,18 @@ func WithSeries(name string, period time.Duration, maxCount int) CollectorOption
 	return WithSeriesListener(name, period, maxCount, nil)
 }
 
-func WithSeriesListener(name string, period time.Duration, maxCount int, lsnr func(TimeBin, FieldInfo)) CollectorOption {
+type ProducedData struct {
+	Time    time.Time `json:"ts"`
+	Value   Product   `json:"value,omitempty"`
+	IsNull  bool      `json:"isNull,omitempty"`
+	Measure string    `json:"measure"`
+	Field   string    `json:"field"`
+	Series  string    `json:"series"`
+	Type    string    `json:"type"`
+	Unit    Unit      `json:"unit"`
+}
+
+func WithSeriesListener(name string, period time.Duration, maxCount int, lsnr func(ProducedData)) CollectorOption {
 	return func(c *Collector) {
 		var productLsnr func(tb TimeBin, meta any)
 		if lsnr != nil {
@@ -136,7 +158,17 @@ func WithSeriesListener(name string, period time.Duration, maxCount int, lsnr fu
 				if !ok {
 					return
 				}
-				lsnr(tb, field)
+				data := ProducedData{
+					Time:    tb.Time,
+					Measure: field.Measure,
+					Field:   field.Name,
+					Series:  field.Series,
+					Unit:    field.Unit,
+					Type:    field.Type,
+					IsNull:  tb.IsNull,
+					Value:   tb.Value,
+				}
+				lsnr(data)
 			}
 		}
 		c.series = append(c.series, CollectorSeries{name: name, period: period, maxCount: maxCount, lsnr: productLsnr})
@@ -288,13 +320,13 @@ func (c *Collector) receive(m Measurement) {
 func (c *Collector) makeMultiTimeSeries(measureName string, field Field) MultiTimeSeries {
 	mts := make(MultiTimeSeries, len(c.series))
 	for i, ser := range c.series {
-		var ts = NewTimeSeries(ser.period, ser.maxCount, field.Type())
+		var ts = NewTimeSeries(ser.period, ser.maxCount, field.Type.Producer())
 		ts.SetListener(ser.lsnr)
 		ts.SetMeta(FieldInfo{
 			Measure: measureName,
 			Name:    field.Name,
 			Series:  ser.name,
-			Type:    field.Type,
+			Type:    field.Type.String(),
 			Unit:    field.Unit,
 		})
 		if c.storage != nil {
