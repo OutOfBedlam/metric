@@ -35,12 +35,12 @@ type Field struct {
 }
 
 type FieldType struct {
-	p Producer
+	p func() Producer
 	s string
 }
 
 func (ft FieldType) Producer() Producer {
-	return ft.p
+	return ft.p()
 }
 
 func (ft FieldType) String() string {
@@ -48,13 +48,13 @@ func (ft FieldType) String() string {
 }
 
 var (
-	FieldTypeCounter = FieldType{p: NewCounter(), s: "counter"}
-	FieldTypeGauge   = FieldType{p: NewGauge(), s: "gauge"}
-	FieldTypeMeter   = FieldType{p: NewMeter(), s: "meter"}
+	FieldTypeCounter = FieldType{p: func() Producer { return NewCounter() }, s: "counter"}
+	FieldTypeGauge   = FieldType{p: func() Producer { return NewGauge() }, s: "gauge"}
+	FieldTypeMeter   = FieldType{p: func() Producer { return NewMeter() }, s: "meter"}
 )
 
 func FieldTypeHistogram(maxBin int, ps ...float64) FieldType {
-	return FieldType{p: NewHistogram(maxBin, ps...), s: "histogram"}
+	return FieldType{p: func() Producer { return NewHistogram(maxBin, ps...) }, s: "histogram"}
 }
 
 type FieldInfo struct {
