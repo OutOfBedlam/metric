@@ -36,7 +36,7 @@ func TestMetric(t *testing.T) {
 	)
 	c.AddInputFunc(func() (Measurement, error) {
 		m := Measurement{Name: "m1"}
-		m.AddField(Field{Name: "f1", Value: 1.0, Unit: UnitShort, Type: FieldTypeCounter})
+		m.AddField(Field{Name: "f1", Value: 1.0, Type: CounterType(UnitShort)})
 		return m, nil
 	})
 	c.Start()

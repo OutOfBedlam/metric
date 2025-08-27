@@ -29,6 +29,24 @@ type Product interface {
 	String() string
 }
 
+type Type struct {
+	p func() Producer
+	s string
+	u Unit
+}
+
+func (ft Type) Producer() Producer {
+	return ft.p()
+}
+
+func (ft Type) String() string {
+	return ft.s
+}
+
+func (ft Type) Unit() Unit {
+	return ft.u
+}
+
 type Unit string
 
 const (

@@ -30,31 +30,38 @@ func (m *Measurement) AddField(f ...Field) {
 type Field struct {
 	Name  string
 	Value float64
-	Unit  Unit
-	Type  FieldType
+	Type  Type
 }
 
-type FieldType struct {
-	p func() Producer
-	s string
+func CounterType(u Unit) Type {
+	return Type{
+		p: func() Producer { return NewCounter() },
+		s: "counter",
+		u: u,
+	}
 }
 
-func (ft FieldType) Producer() Producer {
-	return ft.p()
+func GaugeType(u Unit) Type {
+	return Type{
+		p: func() Producer { return NewGauge() },
+		s: "gauge",
+		u: u,
+	}
+}
+func MeterType(u Unit) Type {
+	return Type{
+		p: func() Producer { return NewMeter() },
+		s: "meter",
+		u: u,
+	}
 }
 
-func (ft FieldType) String() string {
-	return ft.s
-}
-
-var (
-	FieldTypeCounter = FieldType{p: func() Producer { return NewCounter() }, s: "counter"}
-	FieldTypeGauge   = FieldType{p: func() Producer { return NewGauge() }, s: "gauge"}
-	FieldTypeMeter   = FieldType{p: func() Producer { return NewMeter() }, s: "meter"}
-)
-
-func FieldTypeHistogram(maxBin int, ps ...float64) FieldType {
-	return FieldType{p: func() Producer { return NewHistogram(maxBin, ps...) }, s: "histogram"}
+func HistogramType(u Unit, maxBin int, ps ...float64) Type {
+	return Type{
+		p: func() Producer { return NewHistogram(maxBin, ps...) },
+		s: "histogram",
+		u: u,
+	}
 }
 
 type FieldInfo struct {
@@ -327,7 +334,7 @@ func (c *Collector) makeMultiTimeSeries(measureName string, field Field) MultiTi
 			Name:    field.Name,
 			Series:  ser.name,
 			Type:    field.Type.String(),
-			Unit:    field.Unit,
+			Unit:    field.Type.Unit(),
 		})
 		if c.storage != nil {
 			seriesName := cleanPath(ts.interval.String())
