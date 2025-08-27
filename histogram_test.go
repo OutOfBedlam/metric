@@ -53,14 +53,14 @@ func TestHistogramJSON(t *testing.T) {
 
 	data, err := json.Marshal(h)
 	require.NoError(t, err)
-	expected := `{"bins":[{"value":4.500000,"count":8.000000},{"value":12.500000,"count":8.000000},{"value":22.000000,"count":11.000000},{"value":31.000000,"count":7.000000},{"value":40.000000,"count":11.000000},{"value":52.500000,"count":14.000000},{"value":64.500000,"count":10.000000},{"value":74.500000,"count":10.000000},{"value":86.000000,"count":13.000000},{"value":96.500000,"count":8.000000}],"count":100,"qs":[0.5,0.7,0.9]}`
+	expected := `{"bins":[{"value":4.500000,"count":8.000000},{"value":12.500000,"count":8.000000},{"value":22.000000,"count":11.000000},{"value":31.000000,"count":7.000000},{"value":40.000000,"count":11.000000},{"value":52.500000,"count":14.000000},{"value":64.500000,"count":10.000000},{"value":74.500000,"count":10.000000},{"value":86.000000,"count":13.000000},{"value":96.500000,"count":8.000000}],"samples":100,"qs":[0.5,0.7,0.9]}`
 	require.JSONEq(t, expected, string(data))
 
 	var h2 Histogram
 	err = json.Unmarshal(data, &h2)
 	require.NoError(t, err)
 
-	require.Equal(t, h.count, h2.count)
+	require.Equal(t, h.samples, h2.samples)
 	require.Equal(t, h.qs, h2.qs)
 	require.Equal(t, len(h.bins), len(h2.bins))
 	for i := range h.bins {

@@ -385,16 +385,16 @@ func TestTimeSeriesHistogram(t *testing.T) {
 		time.Date(2025, 07, 21, 17, 31, 22, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
 	}, ss.Times)
 	require.Equal(t, []Product{
-		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{5, 8, 10}},
-		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{15, 18, 20}},
-		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{25, 28, 30}},
-		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{35, 38, 40}},
-		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{45, 48, 50}},
-		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{55, 58, 60}},
-		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{65, 68, 70}},
-		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{75, 78, 80}},
-		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{85, 88, 90}},
-		&HistogramProduct{Count: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{95, 98, 100}},
+		&HistogramProduct{Samples: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{5, 8, 10}},
+		&HistogramProduct{Samples: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{15, 18, 20}},
+		&HistogramProduct{Samples: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{25, 28, 30}},
+		&HistogramProduct{Samples: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{35, 38, 40}},
+		&HistogramProduct{Samples: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{45, 48, 50}},
+		&HistogramProduct{Samples: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{55, 58, 60}},
+		&HistogramProduct{Samples: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{65, 68, 70}},
+		&HistogramProduct{Samples: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{75, 78, 80}},
+		&HistogramProduct{Samples: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{85, 88, 90}},
+		&HistogramProduct{Samples: 10, P: []float64{0.5, 0.75, 0.99}, Values: []float64{95, 98, 100}},
 	}, ss.Values)
 }
 

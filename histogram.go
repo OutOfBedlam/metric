@@ -33,8 +33,8 @@ type Histogram struct {
 	sync.Mutex
 	maxBins int
 	bins    []HistBin
-	count   float64
-	qs      []float64 // Quantiles to calculate
+	samples float64
+	qs      []float64 // Quantile to calculate
 }
 
 var _ Producer = (*Histogram)(nil)
@@ -54,7 +54,7 @@ func (h *Histogram) MarshalJSON() ([]byte, error) {
 	h.Lock()
 	defer h.Unlock()
 	data := make(map[string]interface{})
-	data["count"] = int64(h.count)
+	data["samples"] = int64(h.samples)
 	data["qs"] = h.qs
 	data["bins"] = h.bins
 	return json.Marshal(data)
@@ -62,14 +62,14 @@ func (h *Histogram) MarshalJSON() ([]byte, error) {
 
 func (h *Histogram) UnmarshalJSON(data []byte) error {
 	var obj struct {
-		Count int64     `json:"count"`
-		Qs    []float64 `json:"qs"`
-		Bins  []HistBin `json:"bins"`
+		Samples int64     `json:"samples"`
+		Qs      []float64 `json:"qs"`
+		Bins    []HistBin `json:"bins"`
 	}
 	if err := json.Unmarshal(data, &obj); err != nil {
 		return err
 	}
-	h.count = float64(obj.Count)
+	h.samples = float64(obj.Samples)
 	h.qs = obj.Qs
 	h.bins = obj.Bins
 	return nil
@@ -86,7 +86,7 @@ func (h *Histogram) Add(value float64) {
 		h.Unlock()
 	}()
 
-	h.count++
+	h.samples++
 	newBin := HistBin{value: float64(value), count: 1}
 	for i := range h.bins {
 		if h.bins[i].value > float64(value) {
@@ -121,7 +121,7 @@ func (h *Histogram) trim() {
 }
 
 func (h *Histogram) bin(q float64) HistBin {
-	count := q * float64(h.count)
+	count := q * float64(h.samples)
 	for i := range h.bins {
 		count -= h.bins[i].count
 		if count <= 0 {
@@ -140,14 +140,14 @@ func (h *Histogram) Quantile(q float64) float64 {
 func (h *Histogram) Quantiles(qs ...float64) []float64 {
 	h.Lock()
 	defer h.Unlock()
-	return h.quantiles(qs...)
+	return h.quantile(qs...)
 }
 
-func (h *Histogram) quantiles(qs ...float64) []float64 {
+func (h *Histogram) quantile(qs ...float64) []float64 {
 	ret := make([]float64, len(qs))
 	counts := make([]float64, len(qs))
 	for i, q := range qs {
-		counts[i] = q * float64(h.count)
+		counts[i] = q * float64(h.samples)
 	}
 	found := 0
 	for i := range h.bins {
@@ -172,21 +172,21 @@ func (h *Histogram) Produce(reset bool) Product {
 	h.Lock()
 	defer h.Unlock()
 	ret := &HistogramProduct{
-		Count:  int64(h.count),
-		P:      h.qs,
-		Values: h.quantiles(h.qs...),
+		Samples: int64(h.samples),
+		P:       h.qs,
+		Values:  h.quantile(h.qs...),
 	}
 	if reset {
 		h.bins = nil
-		h.count = 0
+		h.samples = 0
 	}
 	return ret
 }
 
 type HistogramProduct struct {
-	Count  int64     `json:"count"`
-	P      []float64 `json:"p"`
-	Values []float64 `json:"values"`
+	Samples int64     `json:"samples"`
+	P       []float64 `json:"p"`
+	Values  []float64 `json:"values"`
 }
 
 func (hp HistogramProduct) String() string {
