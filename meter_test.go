@@ -16,7 +16,7 @@ func TestMeterJSON(t *testing.T) {
 	data, err := json.Marshal(m)
 	require.NoError(t, err)
 
-	expected := `{"first":1,"last":3,"min":1,"max":3,"sum":6,"count":3}`
+	expected := `{"first":1,"last":3,"min":1,"max":3,"sum":6,"samples":3}`
 	require.JSONEq(t, expected, string(data))
 
 	var m2 Meter
@@ -28,5 +28,5 @@ func TestMeterJSON(t *testing.T) {
 	require.Equal(t, m.min, m2.min)
 	require.Equal(t, m.max, m2.max)
 	require.Equal(t, m.sum, m2.sum)
-	require.Equal(t, m.count, m2.count)
+	require.Equal(t, m.samples, m2.samples)
 }

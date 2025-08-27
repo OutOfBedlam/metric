@@ -99,9 +99,9 @@ type CollectorSeries struct {
 // The interval determines how often the inputs will be collected.
 // The collector will run until Stop() is called.
 // It is safe to call Start() multiple times, but Stop() should be called only once
-func NewCollector(interval time.Duration, opts ...CollectorOption) *Collector {
+func NewCollector(opts ...CollectorOption) *Collector {
 	c := &Collector{
-		interval: interval,
+		interval: 10 * time.Second,
 		closeCh:  make(chan struct{}),
 		emitters: make(map[string]*EmitterWrapper),
 	}
@@ -116,6 +116,12 @@ func NewCollector(interval time.Duration, opts ...CollectorOption) *Collector {
 }
 
 type CollectorOption func(c *Collector)
+
+func WithCollectInterval(interval time.Duration) CollectorOption {
+	return func(c *Collector) {
+		c.interval = interval
+	}
+}
 
 func WithSeries(name string, period time.Duration, maxCount int) CollectorOption {
 	return WithSeriesListener(name, period, maxCount, nil)
@@ -175,10 +181,11 @@ func (c *Collector) Start() {
 	c.stopWg.Add(1)
 	go func() {
 		defer c.stopWg.Done()
-		c.runInputs(time.Now()) // initial run
+		c.runInputs(nowFunc()) // initial run
 		for {
 			select {
-			case tm := <-ticker.C:
+			case <-ticker.C:
+				tm := nowFunc()
 				c.runInputs(tm)
 				c.syncStorage()
 			case m := <-c.recvCh:
@@ -325,7 +332,7 @@ func (c *Collector) Snapshot(metricName string, seriesName string) (*Snapshot, e
 		}
 	}
 	if idx < 0 {
-		return nil, MetricNotFoundError
+		return nil, ErrMetricNotFound
 	}
 	return snapshot(metricName, 0)
 }
@@ -483,7 +490,7 @@ func snapshot(metricName string, idx int) (*Snapshot, error) {
 		}
 		return mts[idx].Snapshot(), nil
 	}
-	return nil, MetricNotFoundError
+	return nil, ErrMetricNotFound
 }
 
-var MetricNotFoundError = errors.New("metric not found")
+var ErrMetricNotFound = errors.New("metric not found")

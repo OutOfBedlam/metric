@@ -13,12 +13,12 @@ var _ Producer = (*Meter)(nil)
 
 type Meter struct {
 	sync.Mutex
-	first float64
-	last  float64
-	min   float64
-	max   float64
-	sum   float64
-	count float64
+	first   float64
+	last    float64
+	min     float64
+	max     float64
+	sum     float64
+	samples float64
 }
 
 func (m *Meter) MarshalJSON() ([]byte, error) {
@@ -35,14 +35,14 @@ func (m *Meter) UnmarshalJSON(data []byte) error {
 	m.min = p.Min
 	m.max = p.Max
 	m.sum = p.Sum
-	m.count = float64(p.Count)
+	m.samples = float64(p.Samples)
 	return nil
 }
 
 func (m *Meter) Add(v float64) {
 	m.Lock()
 	defer m.Unlock()
-	if m.count == 0 {
+	if m.samples == 0 {
 		m.first = v
 		m.min = v
 		m.max = v
@@ -55,19 +55,19 @@ func (m *Meter) Add(v float64) {
 	}
 	m.sum += v
 	m.last = v
-	m.count++
+	m.samples++
 }
 
 func (m *Meter) Produce(reset bool) Product {
 	m.Lock()
 	defer m.Unlock()
 	ret := &MeterProduct{
-		Count: int64(m.count),
-		First: float64(m.first),
-		Last:  float64(m.last),
-		Min:   float64(m.min),
-		Max:   float64(m.max),
-		Sum:   float64(m.sum),
+		Samples: int64(m.samples),
+		First:   float64(m.first),
+		Last:    float64(m.last),
+		Min:     float64(m.min),
+		Max:     float64(m.max),
+		Sum:     float64(m.sum),
 	}
 	if reset {
 		m.first = 0
@@ -75,7 +75,7 @@ func (m *Meter) Produce(reset bool) Product {
 		m.min = 0
 		m.max = 0
 		m.sum = 0
-		m.count = 0
+		m.samples = 0
 	}
 	return ret
 }
@@ -86,12 +86,12 @@ func (m *Meter) String() string {
 }
 
 type MeterProduct struct {
-	Count int64   `json:"count"`
-	Sum   float64 `json:"sum"`
-	First float64 `json:"first"`
-	Last  float64 `json:"last"`
-	Min   float64 `json:"min"`
-	Max   float64 `json:"max"`
+	Samples int64   `json:"samples"`
+	Sum     float64 `json:"sum"`
+	First   float64 `json:"first"`
+	Last    float64 `json:"last"`
+	Min     float64 `json:"min"`
+	Max     float64 `json:"max"`
 }
 
 func (mp *MeterProduct) String() string {

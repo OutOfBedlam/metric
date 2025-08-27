@@ -16,13 +16,13 @@ func TestCounterJSON(t *testing.T) {
 	data, err := json.Marshal(c)
 	require.NoError(t, err)
 
-	expected := `{"count":3,"value":6.6}`
+	expected := `{"samples":3,"value":6.6}`
 	require.JSONEq(t, expected, string(data))
 
 	var c2 Counter
 	err = json.Unmarshal(data, &c2)
 	require.NoError(t, err)
 
-	require.Equal(t, c.count, c2.count)
+	require.Equal(t, c.samples, c2.samples)
 	require.Equal(t, c.value, c2.value)
 }
