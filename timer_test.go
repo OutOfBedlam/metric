@@ -17,15 +17,12 @@ func ExampleTimer() {
 
 	timer.Mark(400 * time.Millisecond)
 
-	fmt.Println("Avg:", timer.String())
-
-	s := timer.Snapshot()
+	s := timer.Produce(false)
 	fmt.Printf("%+v\n", s)
 
 	// Output:
 	//
-	// Avg: 750ms
-	// {Samples:2 TotalDuration:1.5s MinDuration:400ms MaxDuration:1.1s}
+	// {"samples":2,"total":1500000000,"min":400000000,"max":1100000000}
 }
 
 func TestTimer(t *testing.T) {
@@ -42,7 +39,7 @@ func TestTimer(t *testing.T) {
 	require.Equal(t, timer.samples, int64(100))
 	require.Equal(t, 10*time.Millisecond, timer.minDuration)
 	require.Equal(t, 1000*time.Millisecond, timer.maxDuration)
-	require.Equal(t, `505ms`, timer.String())
+	require.Equal(t, `{"samples":100,"total":50500000000,"min":10000000,"max":1000000000}`, timer.String())
 }
 
 func TestTimerJSON(t *testing.T) {

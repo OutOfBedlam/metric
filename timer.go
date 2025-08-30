@@ -15,6 +15,8 @@ type Timer struct {
 	maxDuration   time.Duration
 }
 
+var _ Producer = (*Timer)(nil)
+
 func NewTimer() *Timer {
 	return &Timer{}
 }
@@ -44,7 +46,7 @@ func (t *Timer) UnmarshalJSON(data []byte) error {
 }
 
 func (t *Timer) String() string {
-	return time.Duration(t.Value()).String()
+	return t.Produce(false).String()
 }
 
 func (t *Timer) Value() time.Duration {
@@ -56,22 +58,26 @@ func (t *Timer) Value() time.Duration {
 	return time.Duration(int64(t.totalDuration) / t.samples)
 }
 
-type TimerSnapshot struct {
-	Samples       int64         `json:"samples"`
-	TotalDuration time.Duration `json:"total"`
-	MinDuration   time.Duration `json:"min"`
-	MaxDuration   time.Duration `json:"max"`
-}
-
-func (t *Timer) Snapshot() TimerSnapshot {
+func (t *Timer) Produce(reset bool) Product {
 	t.Lock()
 	defer t.Unlock()
-	return TimerSnapshot{
+	ret := TimerProduct{
 		Samples:       t.samples,
 		TotalDuration: t.totalDuration,
 		MinDuration:   t.minDuration,
 		MaxDuration:   t.maxDuration,
 	}
+	if reset {
+		t.samples = 0
+		t.totalDuration = 0
+		t.minDuration = 0
+		t.maxDuration = 0
+	}
+	return ret
+}
+
+func (t *Timer) Add(v float64) {
+	t.Mark(time.Duration(v))
 }
 
 func (t *Timer) Mark(d time.Duration) {
@@ -87,11 +93,14 @@ func (t *Timer) Mark(d time.Duration) {
 	}
 }
 
-func (t *Timer) Reset() {
-	t.Lock()
-	defer t.Unlock()
-	t.samples = 0
-	t.totalDuration = 0
-	t.minDuration = 0
-	t.maxDuration = 0
+type TimerProduct struct {
+	Samples       int64         `json:"samples"`
+	TotalDuration time.Duration `json:"total"`
+	MinDuration   time.Duration `json:"min"`
+	MaxDuration   time.Duration `json:"max"`
+}
+
+func (tp TimerProduct) String() string {
+	b, _ := json.Marshal(tp)
+	return string(b)
 }
