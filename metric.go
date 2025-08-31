@@ -33,6 +33,7 @@ type Field struct {
 	Type  Type
 }
 
+// CounterType supports samples count, value (sum)
 func CounterType(u Unit) Type {
 	return Type{
 		p: func() Producer { return NewCounter() },
@@ -41,6 +42,7 @@ func CounterType(u Unit) Type {
 	}
 }
 
+// GaugeType supports samples count, sum, value (last)
 func GaugeType(u Unit) Type {
 	return Type{
 		p: func() Producer { return NewGauge() },
@@ -48,6 +50,8 @@ func GaugeType(u Unit) Type {
 		u: u,
 	}
 }
+
+// MeterType supports samples count, sum, first, last, min, max
 func MeterType(u Unit) Type {
 	return Type{
 		p: func() Producer { return NewMeter() },
@@ -60,6 +64,15 @@ func HistogramType(u Unit, maxBin int, ps ...float64) Type {
 	return Type{
 		p: func() Producer { return NewHistogram(maxBin, ps...) },
 		s: "histogram",
+		u: u,
+	}
+}
+
+// TimerType supports samples count, total, min, max
+func TimerType(u Unit) Type {
+	return Type{
+		p: func() Producer { return NewTimer() },
+		s: "timer",
 		u: u,
 	}
 }
