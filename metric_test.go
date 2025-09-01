@@ -10,14 +10,10 @@ import (
 )
 
 func TestMetric(t *testing.T) {
-	now := time.Unix(1756251515, 0)
-	nowFunc = func() time.Time {
-		now = now.Add(time.Second)
-		return now
-	}
 	var wg sync.WaitGroup
 	var out string
 	var cnt int
+	var now time.Time
 	wg.Add(3)
 	c := NewCollector(
 		WithCollectInterval(time.Second),
@@ -25,13 +21,14 @@ func TestMetric(t *testing.T) {
 			defer wg.Done()
 			out = fmt.Sprintf("%s:%s %s %v %s %s",
 				pd.Measure, pd.Field, pd.Series, pd.Time.Format(time.TimeOnly), pd.Value.String(), pd.Type)
-			if cnt++; cnt == 1 {
-				require.Equal(t, `m1:f1 1m/1s 08:38:37 {"samples":1,"value":1} counter`, out)
-			} else if cnt == 2 {
-				require.Equal(t, `m1:f1 1m/1s 08:38:38 {"samples":1,"value":1} counter`, out)
-			} else if cnt == 3 {
-				require.Equal(t, `m1:f1 1m/1s 08:38:39 {"samples":1,"value":1} counter`, out)
+			if cnt == 0 {
+				now = pd.Time
+			} else {
+				now = now.Add(time.Second)
 			}
+			cnt++
+			expect := fmt.Sprintf(`m1:f1 1m/1s %s {"samples":1,"value":1} counter`, now.Format(time.TimeOnly))
+			require.Equal(t, expect, out)
 		}),
 	)
 	c.AddInputFunc(func() (Measurement, error) {

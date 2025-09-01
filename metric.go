@@ -8,12 +8,6 @@ import (
 	"time"
 )
 
-// Input represents a metric input source that provides measurements via its Collect method.
-// Periodically called by the Collector to gather metrics.
-type Input interface {
-	Collect() (Measurement, error)
-}
-
 // InputFunc is a function type that matches the signature of the Collect method.
 // Periodically called by the Collector to gather metrics.
 type InputFunc func() (Measurement, error)
@@ -21,6 +15,9 @@ type InputFunc func() (Measurement, error)
 type Measurement struct {
 	Name   string
 	Fields []Field // name -value pairs and producer function
+	// fields not exposed
+	ts     time.Time // time when the measurement was taken
+	doSync bool      // whether to sync storage after this measurement
 }
 
 func (m *Measurement) AddField(f ...Field) {
@@ -92,24 +89,22 @@ type InputWrapper struct {
 	publishedNames map[string]string
 }
 
-type EmitterWrapper struct {
-	measureName    string
-	mtsFields      map[string]MultiTimeSeries
-	publishedNames map[string]string
-}
-
 type Collector struct {
 	sync.Mutex
+
+	// registered input functions
+	inputs map[string]*InputWrapper
+
 	// periodically collects metrics from inputs
-	inputs   []*InputWrapper
 	interval time.Duration
 	closeCh  chan struct{}
 	stopWg   sync.WaitGroup
 
-	// event-driven emitters
-	emitters   map[string]*EmitterWrapper
+	// event-driven measurements
 	recvCh     chan Measurement
 	recvChSize int
+	// a channel to which measurements can be sent.
+	C chan<- Measurement
 
 	// time series configuration
 	series       []CollectorSeries
@@ -134,7 +129,7 @@ func NewCollector(opts ...CollectorOption) *Collector {
 	c := &Collector{
 		interval: 10 * time.Second,
 		closeCh:  make(chan struct{}),
-		emitters: make(map[string]*EmitterWrapper),
+		inputs:   make(map[string]*InputWrapper),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -143,6 +138,7 @@ func NewCollector(opts ...CollectorOption) *Collector {
 		c.recvChSize = 100
 	}
 	c.recvCh = make(chan Measurement, c.recvChSize)
+	c.C = c.recvCh
 	return c
 }
 
@@ -213,19 +209,30 @@ func WithStorage(store Storage) CollectorOption {
 	}
 }
 
-func (c *Collector) AddInput(input Input) {
-	c.AddInputFunc(input.Collect)
-}
+func (c *Collector) AddInputFunc(input InputFunc) error {
+	// initial call to get the measurement name
+	m, err := input()
+	if err != nil {
+		return err
+	}
 
-func (c *Collector) AddInputFunc(input InputFunc) {
 	c.Lock()
-	defer c.Unlock()
+	defer func() {
+		c.Unlock()
+		c.receive(m)
+	}()
+
+	if _, exists := c.inputs[m.Name]; exists {
+		return fmt.Errorf("input with name %q already registered", m.Name)
+	}
 	iw := &InputWrapper{
+		measureName:    m.Name,
 		input:          input,
 		mtsFields:      make(map[string]MultiTimeSeries),
 		publishedNames: make(map[string]string),
 	}
-	c.inputs = append(c.inputs, iw)
+	c.inputs[iw.measureName] = iw
+	return nil
 }
 
 func (c *Collector) Start() {
@@ -233,13 +240,10 @@ func (c *Collector) Start() {
 	c.stopWg.Add(1)
 	go func() {
 		defer c.stopWg.Done()
-		c.runInputs(nowFunc()) // initial run
 		for {
 			select {
-			case <-ticker.C:
-				tm := nowFunc()
-				c.runInputs(tm)
-				c.syncStorage()
+			case ts := <-ticker.C:
+				go c.runInputs(ts)
 			case m := <-c.recvCh:
 				c.receive(m)
 			case <-c.closeCh:
@@ -257,36 +261,6 @@ func (c *Collector) Stop() {
 	c.syncStorage()
 }
 
-func (c *Collector) runInputs(tm time.Time) {
-	c.Lock()
-	defer c.Unlock()
-
-	for _, iw := range c.inputs {
-		measure, err := iw.input()
-		if err != nil {
-			fmt.Printf("Error measuring: %v\n", err)
-			continue
-		}
-		if iw.measureName == "" {
-			iw.measureName = measure.Name
-		}
-		for _, field := range measure.Fields {
-			var mts MultiTimeSeries
-			if fm, exists := iw.mtsFields[field.Name]; exists {
-				mts = fm
-			} else {
-				mts = c.makeMultiTimeSeries(measure.Name, field)
-				iw.mtsFields[field.Name] = mts
-
-				publishName := c.makePublishName(measure.Name, field.Name)
-				expvar.Publish(publishName, mts)
-				iw.publishedNames[field.Name] = publishName
-			}
-			mts.AddTime(tm, field.Value)
-		}
-	}
-}
-
 func (c *Collector) makePublishName(measureName, fieldName string) string {
 	var prefix string
 	if c.expvarPrefix != "" {
@@ -295,45 +269,61 @@ func (c *Collector) makePublishName(measureName, fieldName string) string {
 	return fmt.Sprintf("%s%s:%s", prefix, measureName, fieldName)
 }
 
-// EventChannel returns a channel to which measurements can be sent.
-// This channel is used by emitters to send measurements to the collector.
-func (c *Collector) EventChannel() chan<- Measurement {
-	return c.recvCh
+// Send processes a measurement sent to the collector.
+func (c *Collector) Send(m Measurement) {
+	c.recvCh <- m
 }
 
-// SendEvent processes a measurement sent to the collector.
-func (c *Collector) SendEvent(m Measurement) {
-	c.recvCh <- m
+func (c *Collector) runInputs(ts time.Time) {
+	for _, iw := range c.inputs {
+		if iw.input == nil {
+			continue
+		}
+		measure, err := iw.input()
+		if err != nil {
+			fmt.Printf("Error measuring: %v\n", err)
+			continue
+		}
+		measure.ts = ts
+		c.recvCh <- measure
+	}
+	// trigger storage sync
+	c.recvCh <- Measurement{doSync: true}
 }
 
 func (c *Collector) receive(m Measurement) {
 	c.Lock()
 	defer c.Unlock()
 
-	now := nowFunc()
+	if m.ts.IsZero() {
+		m.ts = nowFunc()
+	}
 
-	emit, ok := c.emitters[m.Name]
+	input, ok := c.inputs[m.Name]
 	if !ok {
-		emit = &EmitterWrapper{
+		input = &InputWrapper{
 			measureName:    m.Name,
 			mtsFields:      make(map[string]MultiTimeSeries),
 			publishedNames: make(map[string]string),
 		}
-		c.emitters[m.Name] = emit
+		c.inputs[m.Name] = input
 	}
 	for _, field := range m.Fields {
 		var mts MultiTimeSeries
-		if fm, exists := emit.mtsFields[field.Name]; exists {
+		if fm, exists := input.mtsFields[field.Name]; exists {
 			mts = fm
 		} else {
 			mts = c.makeMultiTimeSeries(m.Name, field)
-			emit.mtsFields[field.Name] = mts
+			input.mtsFields[field.Name] = mts
 
 			publishName := c.makePublishName(m.Name, field.Name)
 			expvar.Publish(publishName, MultiTimeSeries(mts))
-			emit.publishedNames[field.Name] = publishName
+			input.publishedNames[field.Name] = publishName
 		}
-		mts.AddTime(now, field.Value)
+		mts.AddTime(m.ts, field.Value)
+	}
+	if m.doSync {
+		c.syncStorage()
 	}
 }
 
@@ -393,37 +383,17 @@ func (c *Collector) syncStorage() {
 	if c.storage == nil {
 		return
 	}
-	func() {
-		c.Lock()
-		defer c.Unlock()
-		for _, iw := range c.inputs {
-			for fieldName, mts := range iw.mtsFields {
-				for _, ts := range mts {
-					seriesName := cleanPath(ts.interval.String())
-					err := c.storage.Store(iw.measureName, fieldName, seriesName, ts)
-					if err != nil {
-						fmt.Printf("Failed to store time series for %s %s %s: %v\n", iw.measureName, fieldName, seriesName, err)
-					}
+	for measureName, iw := range c.inputs {
+		for fieldName, mts := range iw.mtsFields {
+			for _, ts := range mts {
+				seriesName := cleanPath(ts.interval.String())
+				err := c.storage.Store(measureName, fieldName, seriesName, ts)
+				if err != nil {
+					fmt.Printf("Failed to store time series for %s %s %s: %v\n", measureName, fieldName, seriesName, err)
 				}
 			}
 		}
-	}()
-
-	func() {
-		c.Lock()
-		defer c.Unlock()
-		for measureName, emit := range c.emitters {
-			for fieldName, mts := range emit.mtsFields {
-				for _, ts := range mts {
-					seriesName := cleanPath(ts.interval.String())
-					err := c.storage.Store(measureName, fieldName, seriesName, ts)
-					if err != nil {
-						fmt.Printf("Failed to store time series for %s %s %s: %v\n", measureName, fieldName, seriesName, err)
-					}
-				}
-			}
-		}
-	}()
+	}
 }
 
 type Output interface {
