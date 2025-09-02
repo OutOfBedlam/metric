@@ -248,7 +248,15 @@ func (c *Collector) Start() {
 				c.receive(m)
 			case <-c.closeCh:
 				ticker.Stop()
-				return
+				// derain the recvCh
+				for {
+					select {
+					case m := <-c.recvCh:
+						c.receive(m)
+					default:
+						return
+					}
+				}
 			}
 		}
 	}()

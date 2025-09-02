@@ -21,14 +21,16 @@ type Producer interface {
 	String() string
 	// MarshalJSON marshals the producer to JSON.
 	MarshalJSON() ([]byte, error)
-	// UnmarshalJSON unmarshals the producer from JSON.
+	// UnmarshalJSON unmarshal the producer from JSON.
 	UnmarshalJSON(data []byte) error
 }
 
+// Product is the output type for the time series.
 type Product interface {
 	String() string
 }
 
+// Type is the type of the Field.
 type Type struct {
 	p func() Producer
 	s string
