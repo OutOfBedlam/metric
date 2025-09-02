@@ -308,7 +308,7 @@ func (c *Collector) receive(m Measurement) {
 	}
 
 	input, ok := c.inputs[m.Name]
-	if !ok {
+	if !ok && len(m.Fields) != 0 {
 		input = &InputWrapper{
 			measureName:    m.Name,
 			mtsFields:      make(map[string]MultiTimeSeries),
@@ -322,11 +322,10 @@ func (c *Collector) receive(m Measurement) {
 			mts = fm
 		} else {
 			mts = c.makeMultiTimeSeries(m.Name, field)
-			input.mtsFields[field.Name] = mts
-
 			publishName := c.makePublishName(m.Name, field.Name)
-			expvar.Publish(publishName, MultiTimeSeries(mts))
+			input.mtsFields[field.Name] = mts
 			input.publishedNames[field.Name] = publishName
+			expvar.Publish(publishName, mts)
 		}
 		mts.AddTime(m.ts, field.Value)
 	}
