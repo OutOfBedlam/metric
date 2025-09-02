@@ -9,6 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestMain(m *testing.M) {
+	timeZone = time.UTC
+	m.Run()
+}
+
 func TestMetric(t *testing.T) {
 	var wg sync.WaitGroup
 	var out string

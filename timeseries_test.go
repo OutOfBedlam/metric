@@ -11,6 +11,7 @@ import (
 func TestTimeseries(t *testing.T) {
 	now := time.Date(2023, 10, 1, 12, 4, 4, 400_000_000, time.UTC)
 	nowFunc = func() time.Time { return now }
+	timeZone = time.UTC
 
 	ts := NewTimeSeries(time.Second, 3, NewMeter())
 	ts.Add(1.0)
@@ -19,8 +20,8 @@ func TestTimeseries(t *testing.T) {
 	ts.Add(2.0)
 
 	require.JSONEq(t, `[`+
-		`{"ts":"2023-10-01 21:04:05","value":{"samples":1,"max":1,"min":1,"first":1,"last":1,"sum":1}},`+
-		`{"ts":"2023-10-01 21:04:06","value":{"samples":1,"max":2,"min":2,"first":2,"last":2,"sum":2}}`+
+		`{"ts":"2023-10-01 12:04:05","value":{"samples":1,"max":1,"min":1,"first":1,"last":1,"sum":1}},`+
+		`{"ts":"2023-10-01 12:04:06","value":{"samples":1,"max":2,"min":2,"first":2,"last":2,"sum":2}}`+
 		`]`, ts.String())
 
 	now = now.Add(time.Second)
@@ -78,7 +79,7 @@ func TestTimeseries(t *testing.T) {
 	ts.Add(7.0)
 
 	require.JSONEq(t, `[`+
-		`{"ts":"2023-10-01 21:04:15","value":{"samples":1,"max":7,"min":7,"first":7,"last":7,"sum":7}}`+
+		`{"ts":"2023-10-01 12:04:15","value":{"samples":1,"max":7,"min":7,"first":7,"last":7,"sum":7}}`+
 		`]`, ts.String())
 }
 
@@ -97,16 +98,16 @@ func TestTimeSeriesSubSeconds(t *testing.T) {
 	}
 
 	require.JSONEq(t, `[`+
-		`{"ts":"2023-10-01 21:04:06","value":{"value":55,"samples":10}},`+
-		`{"ts":"2023-10-01 21:04:07","value":{"value":155,"samples":10}},`+
-		`{"ts":"2023-10-01 21:04:08","value":{"value":255,"samples":10}},`+
-		`{"ts":"2023-10-01 21:04:09","value":{"value":355,"samples":10}},`+
-		`{"ts":"2023-10-01 21:04:10","value":{"value":455,"samples":10}},`+
-		`{"ts":"2023-10-01 21:04:11","value":{"value":555,"samples":10}},`+
-		`{"ts":"2023-10-01 21:04:12","value":{"value":655,"samples":10}},`+
-		`{"ts":"2023-10-01 21:04:13","value":{"value":755,"samples":10}},`+
-		`{"ts":"2023-10-01 21:04:14","value":{"value":855,"samples":10}},`+
-		`{"ts":"2023-10-01 21:04:15","value":{"value":955,"samples":10}}`+
+		`{"ts":"2023-10-01 12:04:06","value":{"value":55,"samples":10}},`+
+		`{"ts":"2023-10-01 12:04:07","value":{"value":155,"samples":10}},`+
+		`{"ts":"2023-10-01 12:04:08","value":{"value":255,"samples":10}},`+
+		`{"ts":"2023-10-01 12:04:09","value":{"value":355,"samples":10}},`+
+		`{"ts":"2023-10-01 12:04:10","value":{"value":455,"samples":10}},`+
+		`{"ts":"2023-10-01 12:04:11","value":{"value":555,"samples":10}},`+
+		`{"ts":"2023-10-01 12:04:12","value":{"value":655,"samples":10}},`+
+		`{"ts":"2023-10-01 12:04:13","value":{"value":755,"samples":10}},`+
+		`{"ts":"2023-10-01 12:04:14","value":{"value":855,"samples":10}},`+
+		`{"ts":"2023-10-01 12:04:15","value":{"value":955,"samples":10}}`+
 		`]`, ts.String())
 
 	ss := ts.Snapshot()
@@ -408,7 +409,7 @@ func createTestStorage(t *testing.T) *FileStorage {
 
 func TestTimeseriesStorage(t *testing.T) {
 	storage := createTestStorage(t)
-	now := time.Date(2023, 10, 1, 12, 4, 4, 0, time.Local)
+	now := time.Date(2023, 10, 1, 12, 4, 4, 0, time.UTC)
 	nowFunc = func() time.Time { return now }
 
 	ts := NewTimeSeries(time.Second, 3, NewMeter())
