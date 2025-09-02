@@ -154,7 +154,7 @@ func WithSeries(name string, period time.Duration, maxCount int) CollectorOption
 	return WithSeriesListener(name, period, maxCount, nil)
 }
 
-type ProducedData struct {
+type ProductData struct {
 	Time    time.Time `json:"ts"`
 	Value   Product   `json:"value,omitempty"`
 	IsNull  bool      `json:"isNull,omitempty"`
@@ -165,7 +165,7 @@ type ProducedData struct {
 	Unit    Unit      `json:"unit"`
 }
 
-func WithSeriesListener(name string, period time.Duration, maxCount int, lsnr func(ProducedData)) CollectorOption {
+func WithSeriesListener(name string, period time.Duration, maxCount int, lsnr func(ProductData)) CollectorOption {
 	return func(c *Collector) {
 		var productLsnr func(tb TimeBin, meta any)
 		if lsnr != nil {
@@ -174,7 +174,7 @@ func WithSeriesListener(name string, period time.Duration, maxCount int, lsnr fu
 				if !ok {
 					return
 				}
-				data := ProducedData{
+				data := ProductData{
 					Time:    tb.Time,
 					Measure: field.Measure,
 					Field:   field.Name,
@@ -361,6 +361,7 @@ func (c *Collector) makeMultiTimeSeries(measureName string, field Field) MultiTi
 	return mts
 }
 
+// Names returns a list of all published metric names in the collector.
 func (c *Collector) Names() []string {
 	c.Lock()
 	defer c.Unlock()
@@ -373,18 +374,50 @@ func (c *Collector) Names() []string {
 	return names
 }
 
-func (c *Collector) Snapshot(metricName string, seriesName string) (*Snapshot, error) {
-	idx := -1
-	for i, n := range c.series {
-		if n.name == seriesName {
-			idx = i
-			break
+// Inflight returns the current collecting data for each series of the specified measure and field.
+// The key of the returned map is the series name.
+// If the measure or field does not exist, it returns ErrMetricNotFound.
+func (c *Collector) Inflight(measure string, field string) (map[string]ProductData, error) {
+	return c.InflightName(c.makePublishName(measure, field))
+}
+
+// InflightName returns the current collecting data for each series of the specified published metric name.
+// The key of the returned map is the series name.
+// If the metric does not exist, it returns ErrMetricNotFound.
+func (c *Collector) InflightName(metricName string) (map[string]ProductData, error) {
+	var mts MultiTimeSeries
+	if ev := expvar.Get(metricName); ev != nil {
+		if m, ok := ev.(MultiTimeSeries); !ok {
+			return nil, fmt.Errorf("metric %s is not a Metric, but %T", metricName, ev)
+		} else {
+			mts = m
 		}
 	}
-	if idx < 0 {
+	if mts == nil {
 		return nil, ErrMetricNotFound
 	}
-	return snapshot(metricName, 0)
+
+	ret := map[string]ProductData{}
+	for idx, n := range c.series {
+		seriesName := n.name
+		nfo, ok := mts[idx].Meta().(FieldInfo)
+		if !ok {
+			return nil, fmt.Errorf("metric %s series %s meta is not FieldInfo, but %T",
+				metricName, seriesName, mts[idx].Meta())
+		}
+		ts, prd := mts[idx].Last()
+		ret[seriesName] = ProductData{
+			Time:    ts,
+			Value:   prd,
+			IsNull:  prd == nil,
+			Measure: nfo.Measure,
+			Field:   nfo.Name,
+			Series:  nfo.Series,
+			Type:    nfo.Type,
+			Unit:    nfo.Unit,
+		}
+	}
+	return ret, nil
 }
 
 func (c *Collector) syncStorage() {

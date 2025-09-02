@@ -17,7 +17,7 @@ func TestMetric(t *testing.T) {
 	wg.Add(3)
 	c := NewCollector(
 		WithCollectInterval(time.Second),
-		WithSeriesListener("1m/1s", time.Second, 60, func(pd ProducedData) {
+		WithSeriesListener("1m/1s", time.Second, 60, func(pd ProductData) {
 			defer wg.Done()
 			out = fmt.Sprintf("%s:%s %s %v %s %s",
 				pd.Measure, pd.Field, pd.Series, pd.Time.Format(time.TimeOnly), pd.Value.String(), pd.Type)
@@ -38,5 +38,15 @@ func TestMetric(t *testing.T) {
 	})
 	c.Start()
 	wg.Wait()
+
+	sn, err := c.Inflight("m1", "f1")
+	require.NoError(t, err)
+	pd := sn["1m/1s"]
+	require.NotNil(t, pd)
+	require.Equal(t, "m1", pd.Measure)
+	require.Equal(t, "f1", pd.Field)
+	require.Equal(t, int64(1), int64(pd.Value.(*CounterProduct).Value))
+	require.Equal(t, int64(1), int64(pd.Value.(*CounterProduct).Samples))
+	require.Equal(t, "counter", pd.Type)
 	c.Stop()
 }
