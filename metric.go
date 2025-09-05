@@ -384,8 +384,8 @@ func (c *Collector) makeMultiTimeSeries(measureName string, field Field) MultiTi
 	return mts
 }
 
-// Names returns a list of all published metric names in the collector.
-func (c *Collector) Names() []string {
+// PublishNames returns a list of all published metric names in the collector.
+func (c *Collector) PublishNames() []string {
 	c.Lock()
 	defer c.Unlock()
 	names := make([]string, 0, len(c.inputs))
@@ -393,6 +393,16 @@ func (c *Collector) Names() []string {
 		for _, publishedName := range iw.publishedNames {
 			names = append(names, publishedName)
 		}
+	}
+	return names
+}
+
+func (c *Collector) SeriesNames() []string {
+	c.Lock()
+	defer c.Unlock()
+	var names = make([]string, len(c.series))
+	for i, s := range c.series {
+		names[i] = s.name
 	}
 	return names
 }
