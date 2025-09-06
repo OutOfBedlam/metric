@@ -60,6 +60,14 @@ func Compile(filters []string, separators ...rune) (Filter, error) {
 	}, nil
 }
 
+func MustCompile(filters []string, separators ...rune) Filter {
+	f, err := Compile(filters, separators...)
+	if err != nil {
+		panic(err)
+	}
+	return f
+}
+
 type compiledPattern struct {
 	glob     string
 	regex    *regexp.Regexp
