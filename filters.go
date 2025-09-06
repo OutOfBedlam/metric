@@ -146,31 +146,26 @@ func replaceSeparators(s string, sep byte) string {
 	return result
 }
 
-func AllowNameFilter(of OutputFunc, patterns ...string) OutputFunc {
+func IncludeNames(of OutputFunc, patterns ...string) OutputFunc {
+	filter, _ := Compile(patterns, ':')
 	return func(p Product) {
 		// check if p.Measure matches any pattern
 		// if matches, call of
 		// else return without calling of
-		name := p.Measure + ":" + p.Field
-		for _, pattern := range patterns {
-			if matched, _ := path.Match(pattern, name); matched {
-				of(p)
-				return // allow if any pattern matches
-			}
+		if filter != nil && filter.Match(p.Measure+":"+p.Field) {
+			of(p)
 		}
 	}
 }
 
-func DenyNameFilter(of OutputFunc, patterns ...string) OutputFunc {
+func ExcludeNames(of OutputFunc, patterns ...string) OutputFunc {
+	filter, _ := Compile(patterns, ':')
 	return func(p Product) {
 		// check if p.Measure matches any pattern
 		// if matches, return without calling of
 		// else call
-		name := p.Measure + ":" + p.Field
-		for _, pattern := range patterns {
-			if matched, _ := path.Match(pattern, name); matched {
-				return // deny if any pattern matches
-			}
+		if filter != nil && filter.Match(p.Measure+":"+p.Field) {
+			return // deny if any pattern matches
 		}
 		of(p)
 	}

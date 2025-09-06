@@ -21,7 +21,7 @@ func TestMetric(t *testing.T) {
 	var now time.Time
 	wg.Add(3)
 	c := NewCollector(
-		WithInterval(time.Second),
+		WithSamplingInterval(time.Second),
 		WithSeries("1m/1s", time.Second, 60),
 	)
 	c.AddOutputFunc(func(pd Product) {

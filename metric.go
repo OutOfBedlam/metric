@@ -4,6 +4,7 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -105,9 +106,9 @@ type Collector struct {
 	outputs []OutputFunc
 
 	// periodically collects metrics from inputs
-	interval time.Duration
-	closeCh  chan struct{}
-	stopWg   sync.WaitGroup
+	samplingInterval time.Duration
+	closeCh          chan struct{}
+	stopWg           sync.WaitGroup
 
 	// event-driven measurements
 	recvCh     chan Measurement
@@ -124,9 +125,9 @@ type Collector struct {
 }
 
 type CollectorSeries struct {
-	name     string
-	period   time.Duration
-	maxCount int
+	Name     string
+	Period   time.Duration
+	MaxCount int
 }
 
 // NewCollector creates a new Collector with the specified interval.
@@ -135,9 +136,9 @@ type CollectorSeries struct {
 // It is safe to call Start() multiple times, but Stop() should be called only once
 func NewCollector(opts ...CollectorOption) *Collector {
 	c := &Collector{
-		interval: 10 * time.Second,
-		closeCh:  make(chan struct{}),
-		inputs:   make(map[string]*InputWrapper),
+		samplingInterval: 10 * time.Second,
+		closeCh:          make(chan struct{}),
+		inputs:           make(map[string]*InputWrapper),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -152,16 +153,17 @@ func NewCollector(opts ...CollectorOption) *Collector {
 
 type CollectorOption func(c *Collector)
 
-// WithInterval sets the collection interval for the collector.
-func WithInterval(interval time.Duration) CollectorOption {
+// WithSamplingInterval sets the collection interval for the collector.
+// Default is 10 seconds.
+func WithSamplingInterval(interval time.Duration) CollectorOption {
 	return func(c *Collector) {
-		c.interval = interval
+		c.samplingInterval = interval
 	}
 }
 
 func WithSeries(name string, period time.Duration, maxCount int) CollectorOption {
 	return func(c *Collector) {
-		c.series = append(c.series, CollectorSeries{name: name, period: period, maxCount: maxCount})
+		c.series = append(c.series, CollectorSeries{Name: name, Period: period, MaxCount: maxCount})
 	}
 }
 
@@ -221,7 +223,7 @@ func (c *Collector) AddInputFunc(input InputFunc) error {
 }
 
 func (c *Collector) Start() {
-	ticker := time.NewTicker(c.interval)
+	ticker := time.NewTicker(c.samplingInterval)
 	c.stopWg.Add(1)
 	go func() {
 		defer c.stopWg.Done()
@@ -360,20 +362,20 @@ func (c *Collector) onProduct(tb TimeBin, meta any) {
 func (c *Collector) makeMultiTimeSeries(measureName string, field Field) MultiTimeSeries {
 	mts := make(MultiTimeSeries, len(c.series))
 	for i, ser := range c.series {
-		var ts = NewTimeSeries(ser.period, ser.maxCount, field.Type.Producer())
+		var ts = NewTimeSeries(ser.Period, ser.MaxCount, field.Type.Producer())
 		ts.SetListener(c.onProduct)
 		ts.SetMeta(FieldInfo{
 			Measure: measureName,
 			Name:    field.Name,
-			Series:  ser.name,
-			Period:  ser.period,
+			Series:  ser.Name,
+			Period:  ser.Period,
 			Type:    field.Type.String(),
 			Unit:    field.Type.Unit(),
 		})
 		if c.storage != nil {
 			seriesName := cleanPath(ts.interval.String())
 			if data, err := c.storage.Load(measureName, field.Name, seriesName); err != nil {
-				fmt.Printf("Failed to load time series for %s %s %s: %v\n", measureName, field.Name, ser.name, err)
+				fmt.Printf("Failed to load time series for %s %s %s: %v\n", measureName, field.Name, ser.Name, err)
 			} else if data != nil {
 				// if file is not exists, data will be nil
 				ts.data = data.data
@@ -382,6 +384,10 @@ func (c *Collector) makeMultiTimeSeries(measureName string, field Field) MultiTi
 		mts[i] = ts
 	}
 	return mts
+}
+
+func (c *Collector) SamplingInterval() time.Duration {
+	return c.samplingInterval
 }
 
 // PublishNames returns a list of all published metric names in the collector.
@@ -397,14 +403,28 @@ func (c *Collector) PublishNames() []string {
 	return names
 }
 
-func (c *Collector) SeriesNames() []string {
+func (c *Collector) MetricNames() []string {
 	c.Lock()
 	defer c.Unlock()
-	var names = make([]string, len(c.series))
-	for i, s := range c.series {
-		names[i] = s.name
+	names := make([]string, 0, len(c.inputs))
+	for _, iw := range c.inputs {
+		for _, publishedName := range iw.publishedNames {
+			if c.expvarPrefix != "" {
+				names = append(names, strings.TrimPrefix(publishedName, c.expvarPrefix+":"))
+			} else {
+				names = append(names, publishedName)
+			}
+		}
 	}
 	return names
+}
+
+func (c *Collector) Series() []CollectorSeries {
+	c.Lock()
+	defer c.Unlock()
+	ret := make([]CollectorSeries, len(c.series))
+	copy(ret, c.series)
+	return ret
 }
 
 // Inflight returns the current collecting data for each series of the specified measure and field.
@@ -432,7 +452,7 @@ func (c *Collector) InflightName(metricName string) (map[string]Product, error) 
 
 	ret := map[string]Product{}
 	for idx, n := range c.series {
-		seriesName := n.name
+		seriesName := n.Name
 		nfo, ok := mts[idx].Meta().(FieldInfo)
 		if !ok {
 			return nil, fmt.Errorf("metric %s series %s meta is not FieldInfo, but %T",

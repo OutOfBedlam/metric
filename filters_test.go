@@ -58,7 +58,7 @@ func TestAllowName(t *testing.T) {
 		of := func(p Product) {
 			called = true
 		}
-		filter := AllowNameFilter(of, tt.patterns...)
+		filter := IncludeNames(of, tt.patterns...)
 		filter(Product{
 			Measure: tt.args.measure,
 			Field:   tt.args.field,
@@ -123,7 +123,7 @@ func TestDenyName(t *testing.T) {
 		of := func(p Product) {
 			called = true
 		}
-		filter := DenyNameFilter(of, tt.patterns...)
+		filter := ExcludeNames(of, tt.patterns...)
 		filter(Product{
 			Measure: tt.args.measure,
 			Field:   tt.args.field,
