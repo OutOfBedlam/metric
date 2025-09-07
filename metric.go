@@ -4,6 +4,7 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -20,8 +21,8 @@ type Measurement struct {
 	Name   string
 	Fields []Field // name -value pairs and producer function
 	// fields not exposed
-	ts     time.Time // time when the measurement was taken
-	doSync bool      // whether to sync storage after this measurement
+	ts   time.Time // time when the measurement was taken
+	noop bool
 }
 
 func (m *Measurement) AddField(f ...Field) {
@@ -270,26 +271,42 @@ func (c *Collector) Send(m Measurement) {
 }
 
 func (c *Collector) runInputs(ts time.Time) {
-	for _, iw := range c.inputs {
+	for name, iw := range c.inputs {
 		if iw.input == nil {
+			measure := Measurement{
+				Name:   name,
+				Fields: nil,
+				ts:     ts,
+				noop:   true,
+			}
+			c.recvCh <- measure
 			continue
+		} else {
+			measure, err := iw.input()
+			if err != nil {
+				fmt.Printf("Error measuring: %v\n", err)
+				continue
+			}
+			measure.ts = ts
+			c.recvCh <- measure
 		}
-		measure, err := iw.input()
-		if err != nil {
-			fmt.Printf("Error measuring: %v\n", err)
-			continue
-		}
-		measure.ts = ts
-		c.recvCh <- measure
 	}
-	// trigger storage sync
-	c.recvCh <- Measurement{doSync: true}
 }
 
 func (c *Collector) receive(m Measurement) {
 	c.Lock()
 	defer c.Unlock()
 
+	if m.noop {
+		if input, ok := c.inputs[m.Name]; ok {
+			for _, mts := range input.mtsFields {
+				for _, ts := range mts {
+					ts.AddTime(m.ts, math.NaN())
+				}
+			}
+		}
+		return
+	}
 	if m.ts.IsZero() {
 		m.ts = nowFunc()
 	}
@@ -315,9 +332,6 @@ func (c *Collector) receive(m Measurement) {
 			expvar.Publish(publishName, mts)
 		}
 		mts.AddTime(m.ts, field.Value)
-	}
-	if m.doSync {
-		c.syncStorage()
 	}
 }
 
@@ -477,6 +491,8 @@ func (c *Collector) syncStorage() {
 	if c.storage == nil {
 		return
 	}
+	c.Lock()
+	defer c.Unlock()
 	for measureName, iw := range c.inputs {
 		for fieldName, mts := range iw.mtsFields {
 			for _, ts := range mts {

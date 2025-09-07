@@ -210,6 +210,14 @@ func (d Dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d Dashboard) HandleFunc(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			fmt.Println("Recovered in Dashboard.Handle:", rec)
+			debug.PrintStack()
+			http.Error(w, fmt.Sprintf("Internal server error: %v", rec), http.StatusInternalServerError)
+		}
+	}()
+
 	if id := r.URL.Query().Get("id"); id == "" {
 		d.HandleIndex(w, r)
 	} else {
@@ -218,11 +226,22 @@ func (d Dashboard) HandleFunc(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d Dashboard) HandleIndex(w http.ResponseWriter, r *http.Request) {
+	// BasePath
+	d.Option.BasePath = r.URL.Path
+	// tsIdx
 	tsIdxStr := r.URL.Query().Get("tsIdx")
 	if _, err := fmt.Sscanf(tsIdxStr, "%d", &d.SeriesIdx); err != nil {
 		d.SeriesIdx = 0
 	}
-	d.Option.BasePath = r.URL.Path
+	// showRemains
+	if r.URL.Query().Has("showRemains") {
+		showRemains := r.URL.Query().Get("showRemains")
+		if showRemains == "0" || strings.ToLower(showRemains) == "false" {
+			d.ShowRemains = false
+		} else {
+			d.ShowRemains = true
+		}
+	}
 	w.Header().Set("Content-Type", "text/html")
 	err := tmplIndex.Execute(w, d)
 	if err != nil {
@@ -232,13 +251,6 @@ func (d Dashboard) HandleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d Dashboard) HandleData(w http.ResponseWriter, r *http.Request) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			fmt.Println("Recovered in HandleData:", rec)
-			debug.PrintStack()
-			http.Error(w, fmt.Sprintf("Internal server error: %v", rec), http.StatusInternalServerError)
-		}
-	}()
 	query := r.URL.Query()
 	id := query.Get("id")
 	tsIdxStr := query.Get("tsIdx")
@@ -255,7 +267,8 @@ func (d Dashboard) HandleData(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if panelOpt.ID == "" {
-		// id not found, which means it is a single metric name per a panel
+		// id not found, which means it is one of the remains
+		// create a new panel option for it with default settings
 		panelOpt = Chart{
 			ID:          id,
 			MetricNames: []string{id},
@@ -356,7 +369,7 @@ func (itm Item) MarshalJSON() ([]byte, error) {
 type Series struct {
 	Name       string         `json:"name"`
 	Data       []Item         `json:"data"`
-	Type       ChartType      `json:"type"`                // e.g. 'line',
+	Type       string         `json:"type"`                // e.g. 'line',
 	Stack      any            `json:"stack,omitempty"`     // nil or stack-name
 	Smooth     bool           `json:"smooth"`              //  true,
 	ShowSymbol bool           `json:"showSymbol"`          // showSymbol: true,
@@ -373,43 +386,30 @@ const (
 	ChartTypeCandlestick ChartType = "candlestick"
 )
 
-func (ss Snapshot) Series(opt Chart) []Series {
-	roundTime := func(t time.Time, interval time.Duration) time.Time {
-		return t.Add(interval / 2).Round(interval)
-	}
-	xAxisMin := roundTime(time.Now().Add(-ss.Interval*time.Duration(ss.MaxCount)), ss.Interval)
-	dataTemplate := make([]Item, ss.MaxCount)
-	for i := range dataTemplate {
-		dataTemplate[i] = Item{(xAxisMin.Add(time.Duration(i) * ss.Interval)).UnixMilli(), nil}
-	}
-	dataOffset := 0
-	for i, datum := range dataTemplate {
-		if datum.Time == ss.Times[0].UnixMilli() {
-			dataOffset = i
-			break
+func (ct ChartType) TypeAndStack(fallback string) (string, any) {
+	switch ct {
+	case ChartTypeLineStack:
+		return "line", "total"
+	case ChartTypeBarStack:
+		return "bar", "total"
+	default:
+		if ct != "" {
+			return string(ct), nil
 		}
 	}
+	return fallback, nil
+}
+
+func (ss Snapshot) Series(opt Chart) []Series {
 	var series []Series
 	switch ss.Meta.Type {
 	case "counter":
-		var typ = ChartTypeBar
-		var stack any
-		switch opt.Type {
-		case ChartTypeLineStack:
-			typ = "line"
-			stack = "total"
-		case ChartTypeBarStack:
-			typ = "bar"
-			stack = "total"
-		default:
-			if opt.Type != "" {
-				typ = opt.Type
-			}
-		}
+		typ, stack := opt.Type.TypeAndStack("bar")
 		series = []Series{
 			{
 				Name:       ss.Meta.Name,
 				Type:       typ,
+				Data:       make([]Item, len(ss.Times)),
 				Stack:      stack,
 				Smooth:     true,
 				ShowSymbol: false,
@@ -418,21 +418,11 @@ func (ss Snapshot) Series(opt Chart) []Series {
 				},
 			},
 		}
-		series[0].Data = dataTemplate
 		for i, t := range ss.Times {
-			v, ok := ss.Values[i].(*CounterValue)
-			if !ok || v.Samples == 0 {
-				continue
+			series[0].Data[i].Time = t.UnixMilli()
+			if v, ok := ss.Values[i].(*CounterValue); ok && v.Samples > 0 {
+				series[0].Data[i].Value = v.Value
 			}
-			for d, datum := range series[0].Data[dataOffset:] {
-				if datum.Time == t.UnixMilli() {
-					dataOffset += d
-					break
-				} else if datum.Time > t.UnixMilli() {
-					break
-				}
-			}
-			series[0].Data[dataOffset].Value = v.Value
 		}
 	case "gauge":
 		// for gauge, show avg and last value
@@ -451,32 +441,22 @@ func (ss Snapshot) Series(opt Chart) []Series {
 			series = append(series, Series{
 				Name:       seriesName,
 				Type:       "line",
+				Data:       make([]Item, len(ss.Times)),
 				Smooth:     true,
 				ShowSymbol: false,
 			})
 		}
-		for idx := range series {
-			series[idx].Data = make([]Item, len(dataTemplate))
-			copy(series[idx].Data, dataTemplate)
-		}
-		for i, t := range ss.Times {
-			v, ok := ss.Values[i].(*GaugeValue)
-			if !ok || v.Samples == 0 {
-				continue
+		for i, tm := range ss.Times {
+			for s := range series {
+				series[s].Data[i].Time = tm.UnixMilli()
 			}
-			for d, datum := range series[0].Data[dataOffset:] {
-				if datum.Time == t.UnixMilli() {
-					dataOffset += d
-					break
-				} else if datum.Time > t.UnixMilli() {
-					break
+			if v, ok := ss.Values[i].(*GaugeValue); ok && v.Samples > 0 {
+				if idx, ok := seriesFlags["avg"]; ok {
+					series[idx].Data[i].Value = v.Sum / float64(v.Samples)
 				}
-			}
-			if idx, ok := seriesFlags["avg"]; ok {
-				series[idx].Data[dataOffset].Value = v.Sum / float64(v.Samples)
-			}
-			if idx, ok := seriesFlags["last"]; ok {
-				series[idx].Data[dataOffset].Value = v.Value
+				if idx, ok := seriesFlags["last"]; ok {
+					series[idx].Data[i].Value = v.Value
+				}
 			}
 		}
 	case "meter":
@@ -484,30 +464,21 @@ func (ss Snapshot) Series(opt Chart) []Series {
 			{
 				Name:       ss.Meta.Name,
 				Type:       "candlestick",
+				Data:       make([]Item, len(ss.Times)),
 				Smooth:     true,
 				ShowSymbol: false,
 			},
 		}
-		series[0].Data = dataTemplate
 		for i, t := range ss.Times {
-			v, ok := ss.Values[i].(*MeterValue)
-			if !ok || v.Samples == 0 {
-				continue
+			series[0].Data[i].Time = t.UnixMilli()
+			if v, ok := ss.Values[i].(*MeterValue); ok && v.Samples > 0 {
+				// data order [open, close, lowest, highest]
+				series[0].Data[i].Value = []any{v.First, v.Last, v.Min, v.Max}
 			}
-			for d, datum := range series[0].Data[dataOffset:] {
-				if datum.Time == t.UnixMilli() {
-					dataOffset += d
-					break
-				} else if datum.Time > t.UnixMilli() {
-					break
-				}
-			}
-			// data order [open, close, lowest, highest]
-			series[0].Data[dataOffset].Value = []any{v.First, v.Last, v.Min, v.Max}
 		}
 	case "histogram":
 		last := ss.Values[len(ss.Values)-1].(*HistogramValue)
-		for idx, p := range last.P {
+		for _, p := range last.P {
 			pName := fmt.Sprintf("p%d", int(p*1000))
 			if pName[len(pName)-1] == '0' {
 				pName = pName[:len(pName)-1]
@@ -515,31 +486,23 @@ func (ss Snapshot) Series(opt Chart) []Series {
 			series = append(series, Series{
 				Name:       ss.Meta.Name + "(" + pName + ")",
 				Type:       "line",
+				Data:       make([]Item, len(ss.Times)),
 				Smooth:     true,
 				ShowSymbol: false,
 				AreaStyle: H{
 					"opacity": 0.3,
 				},
 			})
-			series[idx].Data = make([]Item, len(dataTemplate))
-			copy(series[idx].Data, dataTemplate)
 		}
 
 		for i, t := range ss.Times {
-			v, ok := ss.Values[i].(*HistogramValue)
-			if !ok || v.Samples == 0 {
-				continue
+			for s := range series {
+				series[s].Data[i].Time = t.UnixMilli()
 			}
-			for d, datum := range series[0].Data[dataOffset:] {
-				if datum.Time == t.UnixMilli() {
-					dataOffset += d
-					break
-				} else if datum.Time > t.UnixMilli() {
-					break
+			if v, ok := ss.Values[i].(*HistogramValue); ok && v.Samples > 0 {
+				for pIdx, pVal := range v.Values {
+					series[pIdx].Data[i].Value = pVal
 				}
-			}
-			for pIdx, pVal := range v.Values {
-				series[pIdx].Data[dataOffset].Value = pVal
 			}
 		}
 	}
