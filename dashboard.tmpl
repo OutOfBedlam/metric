@@ -93,6 +93,8 @@
     </script>
 </head>
 <body>
+<div class="header-row">
+    <div class="page-title">{{.PageTitle}}</div>
 {{- if gt (len .Timeseries) 1 -}}
     <div class="series-tabs">
         {{- range $i, $s := .Timeseries }}
@@ -101,8 +103,10 @@
         {{- end }}
     </div>
 {{- end }}
+</div>
 <script>
     var refreshFunctions = [];
+    function refreshAll() { refreshFunctions.forEach(resize => resize()); }
     {{ $ser := index .Timeseries .SeriesIdx }}
     const seriesInterval = {{ $ser.Period.Milliseconds }};
     const samplingInterval = {{ $.SamplingInterval.Milliseconds }};
@@ -113,13 +117,10 @@
         interval = samplingInterval * 10;
     }
     interval = samplingInterval;
-    setInterval(()=>{
-        refreshFunctions.forEach(f => f());
-    }, interval);
+    setInterval(refreshAll, interval);
     let resizeFunctions = [];
-    window.onresize = ()=>{ 
-        resizeFunctions.forEach(resize => resize());
-    };
+    function resizeAll() { resizeFunctions.forEach(resize => resize()); }
+    window.onresize = resizeAll;
 </script>
 <div class="container">
 {{- range $n, $panel := .Panels }}

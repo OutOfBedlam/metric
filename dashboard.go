@@ -19,6 +19,7 @@ func NewDashboard(c *Collector) *Dashboard {
 		Timeseries:       c.Series(),
 		SamplingInterval: c.SamplingInterval(),
 		nameProvider:     c.PublishNames,
+		PageTitle:        "Metrics",
 	}
 	return d
 }
@@ -32,6 +33,7 @@ type Dashboard struct {
 	SeriesIdx        int
 	ShowRemains      bool
 	SamplingInterval time.Duration
+	PageTitle        string
 	nameProvider     func() []string
 }
 
@@ -139,11 +141,25 @@ func DefaultDashboardOption() DashboardOption {
 				"border":        "1px solid rgba(0,0,0,0.1)",
 				"box-shadow":    "2px 2px 5px rgba(0,0,0,0.1)",
 			},
+			".header-row": {
+				"display":         "flex",
+				"justify-content": "space-between",
+				"align-items":     "center",
+				"width":           "100%",
+				"margin-bottom":   "0em",
+			},
+			".page-title": {
+				"font-family":  "'Segoe UI', 'Arial', 'Helvetica Neue', Helvetica, Arial, sans-serif",
+				"font-weight":  "bold",
+				"font-size":    "1.8em",
+				"margin":       "0",
+				"padding-left": "0.5em",
+			},
 			".series-tabs": {
-				"display":       "flex",
-				"gap":           "4px",
-				"margin-bottom": "0.2em",
-				"margin-left":   "4px",
+				"display":      "flex",
+				"gap":          "4px",
+				"font-family":  "'Segoe UI', 'Arial', 'Helvetica Neue', Helvetica, Arial, sans-serif",
+				"margin-right": "4px",
 			},
 			".series-tabs .tab": {
 				"padding":         "6px 16px",
