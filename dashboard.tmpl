@@ -116,6 +116,10 @@
     setInterval(()=>{
         refreshFunctions.forEach(f => f());
     }, interval);
+    let resizeFunctions = [];
+    window.onresize = ()=>{ 
+        resizeFunctions.forEach(resize => resize());
+    };
 </script>
 <div class="container">
 {{- range $n, $panel := .Panels }}
@@ -123,7 +127,7 @@
 	<script type="text/javascript">
 	(() => {
 		var chartDom = document.getElementById('{{$panel.ID}}');
-		var myChart = echarts.init(chartDom, 'dark');
+		var myChart = echarts.init(chartDom, '{{ $opt.Theme }}' );
 		var option = {};
 		function fetchData() {
 			fetch("{{$opt.BasePath}}?id={{$panel.ID}}&tsIdx={{$seriesIdx}}")
@@ -135,9 +139,13 @@
 		}
 		fetchData();
         refreshFunctions.push(fetchData);
+        resizeFunctions.push(myChart.resize);
     })();
 	</script>
 {{- end }}
 </div>
+<script>
+    resizeFunctions.forEach(resize => resize());
+</script>
 </body>
 </html>
