@@ -12,10 +12,16 @@ import (
 
 // InputFunc is a function type that matches the signature of the Collect method.
 // Periodically called by the Collector to gather metrics.
-type InputFunc func() (Measurement, error)
+type InputFunc func(Gather)
 
 // OutputFunc is a function type that processes the collected ProductData.
 type OutputFunc func(Product)
+
+type Gather interface {
+	AddMeasurement(Measurement)
+	AddError(error)
+	Err() error
+}
 
 type Measurement struct {
 	Name   string
@@ -196,30 +202,67 @@ func (c *Collector) AddOutputFunc(output OutputFunc) {
 	c.outputs = append(c.outputs, output)
 }
 
+type Input interface {
+	Init() error
+	Gather(Gather)
+}
+
+type MultipleError []error
+
+var _ error = MultipleError{}
+
+func (me MultipleError) Error() string {
+	var sb strings.Builder
+	for i, err := range me {
+		if i > 0 {
+			sb.WriteString("; ")
+		}
+		sb.WriteString(err.Error())
+	}
+	return sb.String()
+}
+
+func (c *Collector) AddInput(gs ...Input) error {
+	var errs MultipleError = nil
+	for _, g := range gs {
+		if err := c.AddInputFunc(g.Gather); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errs
+}
+
 // AddInputFunc adds an input function to the collector.
 func (c *Collector) AddInputFunc(input InputFunc) error {
 	// initial call to get the measurement name
-	m, err := input()
-	if err != nil {
+	g := &Gatherer{}
+	input(g)
+	if err := g.Err(); err != nil {
 		return err
 	}
 
 	c.Lock()
 	defer func() {
 		c.Unlock()
-		c.receive(m)
+		ts := nowFunc()
+		for _, m := range g.M {
+			m.ts = ts
+			c.receive(m)
+		}
 	}()
 
-	if _, exists := c.inputs[m.Name]; exists {
-		return fmt.Errorf("input with name %q already registered", m.Name)
+	for _, m := range g.M {
+		if _, exists := c.inputs[m.Name]; exists {
+			return fmt.Errorf("input with name %q already registered", m.Name)
+		}
+		iw := &InputWrapper{
+			measureName:    m.Name,
+			input:          input,
+			mtsFields:      make(map[string]MultiTimeSeries),
+			publishedNames: make(map[string]string),
+		}
+		c.inputs[iw.measureName] = iw
 	}
-	iw := &InputWrapper{
-		measureName:    m.Name,
-		input:          input,
-		mtsFields:      make(map[string]MultiTimeSeries),
-		publishedNames: make(map[string]string),
-	}
-	c.inputs[iw.measureName] = iw
 	return nil
 }
 
@@ -270,6 +313,31 @@ func (c *Collector) Send(m Measurement) {
 	c.recvCh <- m
 }
 
+type Gatherer struct {
+	C    *Collector
+	M    []Measurement
+	errs MultipleError
+}
+
+func (g *Gatherer) AddMeasurement(m Measurement) {
+	g.M = append(g.M, m)
+}
+
+func (g *Gatherer) AddError(err error) {
+	g.errs = append(g.errs, err)
+}
+
+func (g *Gatherer) Err() error {
+	if len(g.errs) == 0 {
+		return nil
+	} else if len(g.errs) == 1 {
+		return g.errs[0]
+	}
+	return g.errs
+}
+
+var _ Gather = &Gatherer{}
+
 func (c *Collector) runInputs(ts time.Time) {
 	for name, iw := range c.inputs {
 		if iw.input == nil {
@@ -282,13 +350,16 @@ func (c *Collector) runInputs(ts time.Time) {
 			c.recvCh <- measure
 			continue
 		} else {
-			measure, err := iw.input()
-			if err != nil {
+			gather := &Gatherer{}
+			iw.input(gather)
+			if err := gather.Err(); err != nil {
 				fmt.Printf("Error measuring: %v\n", err)
 				continue
 			}
-			measure.ts = ts
-			c.recvCh <- measure
+			for _, measure := range gather.M {
+				measure.ts = ts
+				c.recvCh <- measure
+			}
 		}
 	}
 }
