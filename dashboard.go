@@ -188,6 +188,7 @@ func (d *Dashboard) SetTheme(theme string) {
 	switch theme {
 	case "light":
 		d.Option.Style["body"]["background"] = "rgb(255, 255, 255)"
+		d.Option.Style[".page-title"]["color"] = "#222"
 		d.Option.Style[".series-tabs .tab.active"]["border-bottom"] = "2px solid #c83707ff"
 		d.Option.Style[".series-tabs .tab.active"]["background"] = "#bbb"
 		d.Option.Style[".series-tabs .tab"]["background"] = "#eee"
@@ -195,6 +196,7 @@ func (d *Dashboard) SetTheme(theme string) {
 		d.Option.Style[".series-tabs .tab:hover"]["background"] = "#ddd"
 	case "dark":
 		d.Option.Style["body"]["background"] = "rgb(38,40,49)"
+		d.Option.Style[".page-title"]["color"] = "#eee"
 		d.Option.Style[".series-tabs .tab.active"]["border-bottom"] = "2px solid #fff"
 		d.Option.Style[".series-tabs .tab.active"]["background"] = "#444"
 		d.Option.Style[".series-tabs .tab"]["background"] = "#222"
