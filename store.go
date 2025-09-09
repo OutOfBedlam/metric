@@ -15,6 +15,9 @@ type Storage interface {
 }
 
 func NewFileStorage(dir string) *FileStorage {
+	if dir == "" {
+		return nil
+	}
 	return &FileStorage{dir: dir}
 }
 

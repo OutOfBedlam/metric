@@ -231,18 +231,27 @@ func (me MultipleError) Error() string {
 }
 
 func (c *Collector) AddInput(gs ...Input) error {
-	var errs MultipleError = nil
+	var errs MultipleError
 	for _, g := range gs {
+		if hasInit, ok := g.(interface{ Init() error }); ok {
+			// TODO: call DeInit() of the Input
+			if err := hasInit.Init(); err != nil {
+				errs = append(errs, err)
+			}
+		}
 		if err := c.AddInputFunc(g.Gather); err != nil {
 			errs = append(errs, err)
 		}
 	}
-	return errs
+	if len(errs) > 0 {
+		return errs
+	}
+	return nil
 }
 
 // AddInputFunc adds an input function to the collector.
 func (c *Collector) AddInputFunc(input InputFunc) error {
-	// initial call to get the measurement name
+	// the first call to get the measurement name
 	g := &Gatherer{}
 	input(g)
 	if err := g.Err(); err != nil {
