@@ -51,8 +51,9 @@ func TestAllowName(t *testing.T) {
 
 	for _, tt := range tests {
 		called := false
-		of := func(p Product) {
+		of := func(p Product) error {
 			called = true
+			return nil
 		}
 		filter := IncludeNames(of, tt.patterns...)
 		filter(Product{
@@ -111,8 +112,9 @@ func TestDenyName(t *testing.T) {
 
 	for _, tt := range tests {
 		called := false
-		of := func(p Product) {
+		of := func(p Product) error {
 			called = true
+			return nil
 		}
 		filter := ExcludeNames(of, tt.patterns...)
 		filter(Product{

@@ -12,33 +12,19 @@ import (
 
 // InputFunc is a function type that matches the signature of the Collect method.
 // Periodically called by the Collector to gather metrics.
-type InputFunc func(*Gather)
+type InputFunc func(*Gather) error
 
 // OutputFunc is a function type that processes the collected ProductData.
-type OutputFunc func(Product)
+type OutputFunc func(Product) error
 
 type Gather struct {
 	fields []Field
 	ts     time.Time
 	noop   bool
-	errs   MultipleError
 }
 
 func (g *Gather) Add(name string, value float64, typ Type) {
 	g.fields = append(g.fields, Field{Name: name, Value: value, Type: typ})
-}
-
-func (g *Gather) AddError(err error) {
-	g.errs = append(g.errs, err)
-}
-
-func (g Gather) Err() error {
-	if len(g.errs) == 0 {
-		return nil
-	} else if len(g.errs) == 1 {
-		return g.errs[0]
-	}
-	return g.errs
 }
 
 type Field struct {
@@ -202,11 +188,11 @@ func WithStorage(store Storage) CollectorOption {
 }
 
 type Input interface {
-	Gather(*Gather)
+	Gather(*Gather) error
 }
 
 type Output interface {
-	Process(Product)
+	Process(Product) error
 }
 
 type MultipleError []error
@@ -247,8 +233,8 @@ type OutputFuncWrapper struct {
 	f OutputFunc
 }
 
-func (ow *OutputFuncWrapper) Process(p Product) {
-	ow.f(p)
+func (ow *OutputFuncWrapper) Process(p Product) error {
+	return ow.f(p)
 }
 
 // AddOutputFunc adds an output function to the collector.
@@ -278,8 +264,7 @@ func (c *Collector) AddInput(inputs ...Input) error {
 		}
 		// the first call to get the measurement name
 		g := &Gather{}
-		input.Gather(g)
-		if err := g.Err(); err != nil {
+		if err := input.Gather(g); err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -296,8 +281,8 @@ type InputFuncWrapper struct {
 	f InputFunc
 }
 
-func (iw *InputFuncWrapper) Gather(g *Gather) {
-	iw.f(g)
+func (iw *InputFuncWrapper) Gather(g *Gather) error {
+	return iw.f(g)
 }
 
 // AddInputFunc adds an input function to the collector.
@@ -371,8 +356,7 @@ func (c *Collector) Send(fields ...Field) {
 func (c *Collector) runInputs(ts time.Time) {
 	for _, input := range c.inputs {
 		gather := &Gather{}
-		input.Gather(gather)
-		if err := gather.Err(); err != nil {
+		if err := input.Gather(gather); err != nil {
 			fmt.Printf("Error measuring: %v\n", err)
 			continue
 		}
@@ -448,7 +432,9 @@ func (c *Collector) onProduct(tb TimeBin, meta any) {
 		Unit:   field.Unit,
 	}
 	for _, out := range c.outputs {
-		out.Process(data)
+		if err := out.Process(data); err != nil {
+			fmt.Printf("Error processing output for %s: %v\n", field.Name, err)
+		}
 	}
 }
 

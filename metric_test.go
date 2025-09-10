@@ -24,7 +24,7 @@ func TestMetric(t *testing.T) {
 		WithSamplingInterval(time.Second),
 		WithSeries("1m/1s", time.Second, 60),
 	)
-	c.AddOutputFunc(func(pd Product) {
+	c.AddOutputFunc(func(pd Product) error {
 		defer wg.Done()
 		out = fmt.Sprintf("%s %s %v %s %s",
 			pd.Name, pd.Series, pd.Time.Format(time.TimeOnly), pd.Value.String(), pd.Type)
@@ -36,9 +36,11 @@ func TestMetric(t *testing.T) {
 		cnt++
 		expect := fmt.Sprintf(`m1:f1 1m/1s %s {"samples":1,"value":1} counter`, now.Format(time.TimeOnly))
 		require.Equal(t, expect, out)
+		return nil
 	})
-	c.AddInputFunc(func(g *Gather) {
+	c.AddInputFunc(func(g *Gather) error {
 		g.Add("m1:f1", 1.0, CounterType(UnitShort))
+		return nil
 	})
 	c.Start()
 	wg.Wait()
