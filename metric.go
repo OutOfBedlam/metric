@@ -27,6 +27,16 @@ func (g *Gather) Add(name string, value float64, typ Type) {
 	g.fields = append(g.fields, Field{Name: name, Value: value, Type: typ})
 }
 
+func (g *Gather) Filter(filter Filter) {
+	var fields []Field
+	for _, f := range g.fields {
+		if filter == nil || filter.Match(f.Name) {
+			fields = append(fields, f)
+		}
+	}
+	g.fields = fields
+}
+
 type Field struct {
 	Name  string
 	Value float64
@@ -105,6 +115,9 @@ type Collector struct {
 	outputs    []Output                   // registered output
 	timeseries map[string]MultiTimeSeries // field_name: multi-timeseries
 
+	// only data that match the filter will be stored
+	timeseriesFilter Filter
+
 	// periodically collects metrics from inputs
 	samplingInterval time.Duration
 	closeCh          chan struct{}
@@ -167,6 +180,12 @@ func WithSeries(name string, period time.Duration, maxCount int) CollectorOption
 	}
 }
 
+func WithTimeseriesFilter(filter Filter) CollectorOption {
+	return func(c *Collector) {
+		c.timeseriesFilter = filter
+	}
+}
+
 // WithPrefix sets the prefix for all published expvar metrics.
 func WithPrefix(prefix string) CollectorOption {
 	return func(c *Collector) {
@@ -193,6 +212,58 @@ type Input interface {
 
 type Output interface {
 	Process(Product) error
+}
+
+type FilterInput struct {
+	Filter Filter
+	Input  Input
+}
+
+func (fi *FilterInput) Init() error {
+	if hasInit, ok := fi.Input.(interface{ Init() error }); ok {
+		return hasInit.Init()
+	}
+	return nil
+}
+
+func (fi *FilterInput) Gather(g *Gather) error {
+	err := fi.Input.Gather(g)
+	if err != nil {
+		return err
+	}
+	g.Filter(fi.Filter)
+	return nil
+}
+
+func (fi *FilterInput) DeInit() {
+	if hasDeInit, ok := fi.Input.(interface{ DeInit() }); ok {
+		hasDeInit.DeInit()
+	}
+}
+
+type FilterOutput struct {
+	Filter Filter
+	Output Output
+}
+
+func (fo *FilterOutput) Init() error {
+	if hasInit, ok := fo.Output.(interface{ Init() error }); ok {
+		return hasInit.Init()
+	}
+	return nil
+}
+
+func (fo *FilterOutput) Process(p Product) error {
+	if fo.Filter != nil && !fo.Filter.Match(p.Name) {
+		return nil
+	}
+	return fo.Output.Process(p)
+}
+
+func (fo *FilterOutput) DeInit() {
+	if hasDeInit, ok := fo.Output.(interface{ DeInit() }); ok {
+		hasDeInit.DeInit()
+	}
 }
 
 type MultipleError []error
@@ -354,6 +425,15 @@ func (c *Collector) Send(fields ...Field) {
 }
 
 func (c *Collector) runInputs(ts time.Time) {
+	// there are chances that recvCh is already closed
+	// because of Stop() has been called.
+	// so we need to recover from panic.
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println("Recovered in runInputs:", r)
+		}
+	}()
+
 	for _, input := range c.inputs {
 		gather := &Gather{}
 		if err := input.Gather(gather); err != nil {
@@ -361,8 +441,6 @@ func (c *Collector) runInputs(ts time.Time) {
 			continue
 		}
 		gather.ts = ts
-		// TODO: there are chances that recvCh is already closed
-		// because of Stop() has been called.
 		c.recvCh <- gather
 	}
 	c.recvCh <- &Gather{noop: true, ts: ts}
@@ -387,6 +465,9 @@ func (c *Collector) receive(m *Gather) {
 	}
 
 	for _, field := range m.fields {
+		if c.timeseriesFilter != nil && !c.timeseriesFilter.Match(field.Name) {
+			continue
+		}
 		var mts MultiTimeSeries
 		if fm, exists := c.timeseries[field.Name]; exists {
 			mts = fm

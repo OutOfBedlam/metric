@@ -180,6 +180,50 @@ func ExcludeNames(of OutputFunc, patterns ...string) OutputFunc {
 	}
 }
 
+func AndFilter(a Filter, b Filter) Filter {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	return &andFilter{
+		aFilter: a,
+		bFilter: b,
+	}
+}
+
+type andFilter struct {
+	aFilter Filter
+	bFilter Filter
+}
+
+func (af *andFilter) Match(s string) bool {
+	return af.aFilter.Match(s) && af.bFilter.Match(s)
+}
+
+func OrFilter(a Filter, b Filter) Filter {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	return &orFilter{
+		aFilter: a,
+		bFilter: b,
+	}
+}
+
+type orFilter struct {
+	aFilter Filter
+	bFilter Filter
+}
+
+func (of *orFilter) Match(s string) bool {
+	return of.aFilter.Match(s) || of.bFilter.Match(s)
+}
+
 type IncludeAndExclude struct {
 	includeFilter Filter
 	excludeFilter Filter

@@ -179,3 +179,63 @@ func TestCompileEmptyPatterns(t *testing.T) {
 		t.Errorf("Expected nil filter for empty patterns, got %v", f)
 	}
 }
+
+func TestAndFilter(t *testing.T) {
+	trueFilter := MustCompile([]string{"foo"})
+	falseFilter := MustCompile([]string{"bar"})
+
+	and := AndFilter(trueFilter, trueFilter)
+	if !and.Match("foo") {
+		t.Error("AndFilter: expected true when both filters match")
+	}
+
+	and = AndFilter(trueFilter, falseFilter)
+	if and.Match("foo") {
+		t.Error("AndFilter: expected false when one filter does not match")
+	}
+
+	and = AndFilter(falseFilter, falseFilter)
+	if and.Match("foo") {
+		t.Error("AndFilter: expected false when both filters do not match")
+	}
+
+	and = AndFilter(nil, trueFilter)
+	if !and.Match("foo") {
+		t.Error("AndFilter: expected true when one filter is nil and the other matches")
+	}
+
+	and = AndFilter(nil, nil)
+	if and != nil {
+		t.Error("AndFilter: expected nil when both filters are nil")
+	}
+}
+
+func TestOrFilter(t *testing.T) {
+	trueFilter := MustCompile([]string{"foo"})
+	falseFilter := MustCompile([]string{"bar"})
+
+	or := OrFilter(trueFilter, trueFilter)
+	if !or.Match("foo") {
+		t.Error("OrFilter: expected true when both filters match")
+	}
+
+	or = OrFilter(trueFilter, falseFilter)
+	if !or.Match("foo") {
+		t.Error("OrFilter: expected true when one filter matches")
+	}
+
+	or = OrFilter(falseFilter, falseFilter)
+	if or.Match("baz") {
+		t.Error("OrFilter: expected false when both filters do not match")
+	}
+
+	or = OrFilter(nil, trueFilter)
+	if !or.Match("foo") {
+		t.Error("OrFilter: expected true when one filter is nil and the other matches")
+	}
+
+	or = OrFilter(nil, nil)
+	if or != nil {
+		t.Error("OrFilter: expected nil when both filters are nil")
+	}
+}
