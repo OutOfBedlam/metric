@@ -374,11 +374,10 @@ func (d Dashboard) HandleData(w http.ResponseWriter, r *http.Request) {
 		"interval": seriesInterval.Milliseconds(),
 		"maxCount": seriesMaxCount,
 		"meta": H{
-			"measure": meta.Measure,
-			"field":   meta.Name,
-			"series":  meta.Series,
-			"unit":    meta.Unit,
-			"type":    meta.Type,
+			"name":   meta.Name,
+			"series": meta.Series,
+			"unit":   meta.Unit,
+			"type":   meta.Type,
 		},
 	})
 	if err != nil {

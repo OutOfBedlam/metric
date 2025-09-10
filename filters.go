@@ -160,7 +160,7 @@ func IncludeNames(of OutputFunc, patterns ...string) OutputFunc {
 		// check if p.Measure matches any pattern
 		// if matches, call of
 		// else return without calling of
-		if filter != nil && filter.Match(p.Measure+":"+p.Field) {
+		if filter != nil && filter.Match(p.Name) {
 			of(p)
 		}
 	}
@@ -172,7 +172,7 @@ func ExcludeNames(of OutputFunc, patterns ...string) OutputFunc {
 		// check if p.Measure matches any pattern
 		// if matches, return without calling of
 		// else call
-		if filter != nil && filter.Match(p.Measure+":"+p.Field) {
+		if filter != nil && filter.Match(p.Name) {
 			return // deny if any pattern matches
 		}
 		of(p)
