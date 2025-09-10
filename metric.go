@@ -501,10 +501,18 @@ func (c *Collector) MetricNames() []string {
 	c.Lock()
 	defer c.Unlock()
 	names := make([]string, 0, len(c.inputs))
-	for name, _ := range c.timeseries {
+	for name := range c.timeseries {
 		names = append(names, name)
 	}
 	return names
+}
+
+// Timeseries returns the MultiTimeSeries for the specified field name.
+// If the field does not exist, it returns nil.
+func (c *Collector) Timeseries(name string) MultiTimeSeries {
+	c.Lock()
+	defer c.Unlock()
+	return c.timeseries[name]
 }
 
 func (c *Collector) Series() []CollectorSeries {

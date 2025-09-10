@@ -3,7 +3,6 @@ package metric
 import (
 	_ "embed"
 	"encoding/json"
-	"expvar"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -15,11 +14,12 @@ import (
 
 func NewDashboard(c *Collector) *Dashboard {
 	d := &Dashboard{
-		Option:           DefaultDashboardOption(),
-		Timeseries:       c.Series(),
-		SamplingInterval: c.SamplingInterval(),
-		nameProvider:     c.PublishNames,
-		PageTitle:        "Metrics",
+		Option:             DefaultDashboardOption(),
+		Timeseries:         c.Series(),
+		SamplingInterval:   c.SamplingInterval(),
+		nameProvider:       c.MetricNames,
+		timeseriesProvider: c.Timeseries,
+		PageTitle:          "Metrics",
 	}
 	return d
 }
@@ -27,14 +27,15 @@ func NewDashboard(c *Collector) *Dashboard {
 var _ http.Handler = (*Dashboard)(nil)
 
 type Dashboard struct {
-	Option           DashboardOption
-	Charts           []Chart
-	Timeseries       []CollectorSeries
-	SeriesIdx        int
-	ShowRemains      bool
-	SamplingInterval time.Duration
-	PageTitle        string
-	nameProvider     func() []string
+	Option             DashboardOption
+	Charts             []Chart
+	Timeseries         []CollectorSeries
+	SeriesIdx          int
+	ShowRemains        bool
+	SamplingInterval   time.Duration
+	PageTitle          string
+	nameProvider       func() []string
+	timeseriesProvider func(string) MultiTimeSeries
 }
 
 type Chart struct {
@@ -322,7 +323,7 @@ func (d Dashboard) HandleData(w http.ResponseWriter, r *http.Request) {
 	var seriesInterval time.Duration
 	var notFound bool = true
 	for _, metricName := range panelOpt.MetricNames {
-		ss, ssExists := getSnapshot(metricName, tsIdx)
+		ss, ssExists := d.getSnapshot(metricName, tsIdx)
 
 		if !ssExists {
 			panelOpt.SubTitle = "Metric not found"
@@ -588,26 +589,26 @@ type Snapshot struct {
 	Meta        FieldInfo
 }
 
-func getSnapshot(expvarKey string, tsIdx int) (Snapshot, bool) {
+func (d Dashboard) getSnapshot(expvarKey string, tsIdx int) (Snapshot, bool) {
 	var ret Snapshot
-	if g := expvar.Get(expvarKey); g != nil {
-		mts := g.(MultiTimeSeries)
-		if tsIdx < 0 || tsIdx >= len(mts) {
-			return ret, false
-		}
-		ts := mts[tsIdx]
-		times, values := ts.All()
-		if len(times) > 0 {
-			ret = Snapshot{
-				PublishName: expvarKey,
-				Times:       times,
-				Values:      values,
-				Interval:    ts.Interval(),
-				MaxCount:    ts.MaxCount(),
-				Meta:        ts.Meta().(FieldInfo),
-			}
-		}
-		return ret, true
+	mts := d.timeseriesProvider(expvarKey)
+	if mts == nil {
+		return ret, false
 	}
-	return ret, false
+	if tsIdx < 0 || tsIdx >= len(mts) {
+		return ret, false
+	}
+	ts := mts[tsIdx]
+	times, values := ts.All()
+	if len(times) > 0 {
+		ret = Snapshot{
+			PublishName: expvarKey,
+			Times:       times,
+			Values:      values,
+			Interval:    ts.Interval(),
+			MaxCount:    ts.MaxCount(),
+			Meta:        ts.Meta().(FieldInfo),
+		}
+	}
+	return ret, true
 }
