@@ -203,16 +203,12 @@ func WithStorage(store Storage) CollectorOption {
 	}
 }
 
-// AddOutputFunc adds an output function to the collector.
-// The output function will be called with the collected Product.
-func (c *Collector) AddOutputFunc(output OutputFunc) {
-	c.Lock()
-	defer c.Unlock()
-	c.outputs = append(c.outputs, output)
-}
-
 type Input interface {
 	Gather(Gather)
+}
+
+type Output interface {
+	Process(Product)
 }
 
 type MultipleError []error
@@ -230,6 +226,32 @@ func (me MultipleError) Error() string {
 	return sb.String()
 }
 
+func (c *Collector) AddOutput(o ...Output) error {
+	var errs MultipleError
+	for _, out := range o {
+		if hasInit, ok := out.(interface{ Init() error }); ok {
+			// TODO: call DeInit() of the Output
+			if err := hasInit.Init(); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+		}
+		c.AddOutputFunc(out.Process)
+	}
+	if len(errs) > 0 {
+		return errs
+	}
+	return nil
+}
+
+// AddOutputFunc adds an output function to the collector.
+// The output function will be called with the collected Product.
+func (c *Collector) AddOutputFunc(output OutputFunc) {
+	c.Lock()
+	defer c.Unlock()
+	c.outputs = append(c.outputs, output)
+}
+
 func (c *Collector) AddInput(gs ...Input) error {
 	var errs MultipleError
 	for _, g := range gs {
@@ -237,6 +259,7 @@ func (c *Collector) AddInput(gs ...Input) error {
 			// TODO: call DeInit() of the Input
 			if err := hasInit.Init(); err != nil {
 				errs = append(errs, err)
+				continue
 			}
 		}
 		if err := c.AddInputFunc(g.Gather); err != nil {
