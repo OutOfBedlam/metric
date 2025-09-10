@@ -108,7 +108,7 @@ type FieldInfo struct {
 }
 
 type InputWrapper struct {
-	inputs         []InputFunc
+	inputs         []Input
 	measureName    string
 	mtsFields      map[string]MultiTimeSeries
 	publishedNames map[string]string
@@ -119,7 +119,7 @@ type Collector struct {
 
 	// registered input functions
 	inputs  map[string]*InputWrapper
-	outputs []OutputFunc
+	outputs []Output
 
 	// periodically collects metrics from inputs
 	samplingInterval time.Duration
@@ -226,44 +226,81 @@ func (me MultipleError) Error() string {
 	return sb.String()
 }
 
-func (c *Collector) AddOutput(o ...Output) error {
+func (c *Collector) AddOutput(outputs ...Output) error {
 	var errs MultipleError
-	for _, out := range o {
+	c.Lock()
+	defer c.Unlock()
+	for _, out := range outputs {
 		if hasInit, ok := out.(interface{ Init() error }); ok {
-			// TODO: call DeInit() of the Output
 			if err := hasInit.Init(); err != nil {
 				errs = append(errs, err)
 				continue
 			}
 		}
-		c.AddOutputFunc(out.Process)
+		c.outputs = append(c.outputs, out)
 	}
 	if len(errs) > 0 {
 		return errs
 	}
 	return nil
+}
+
+type OutputFuncWrapper struct {
+	f OutputFunc
+}
+
+func (ow *OutputFuncWrapper) Process(p Product) {
+	ow.f(p)
 }
 
 // AddOutputFunc adds an output function to the collector.
 // The output function will be called with the collected Product.
 func (c *Collector) AddOutputFunc(output OutputFunc) {
-	c.Lock()
-	defer c.Unlock()
-	c.outputs = append(c.outputs, output)
+	c.outputs = append(c.outputs, &OutputFuncWrapper{output})
 }
 
-func (c *Collector) AddInput(gs ...Input) error {
+func (c *Collector) AddInput(inputs ...Input) error {
 	var errs MultipleError
-	for _, g := range gs {
-		if hasInit, ok := g.(interface{ Init() error }); ok {
-			// TODO: call DeInit() of the Input
+	var initialGathers []Gatherer
+	c.Lock()
+	defer func() {
+		c.Unlock()
+		ts := nowFunc()
+		for _, g := range initialGathers {
+			for _, m := range g.M {
+				m.ts = ts
+				c.receive(m)
+			}
+		}
+	}()
+	for _, input := range inputs {
+		if hasInit, ok := input.(interface{ Init() error }); ok {
 			if err := hasInit.Init(); err != nil {
 				errs = append(errs, err)
 				continue
 			}
 		}
-		if err := c.AddInputFunc(g.Gather); err != nil {
+		// the first call to get the measurement name
+		g := Gatherer{}
+		input.Gather(&g)
+		if err := g.Err(); err != nil {
 			errs = append(errs, err)
+			continue
+		}
+		initialGathers = append(initialGathers, g)
+
+		for _, m := range g.M {
+			if iw, exists := c.inputs[m.Name]; exists {
+				iw.inputs = append(iw.inputs, input)
+			} else {
+				iw := &InputWrapper{
+					measureName:    m.Name,
+					inputs:         []Input{input},
+					mtsFields:      make(map[string]MultiTimeSeries),
+					publishedNames: make(map[string]string),
+				}
+				c.inputs[iw.measureName] = iw
+			}
 		}
 	}
 	if len(errs) > 0 {
@@ -272,39 +309,17 @@ func (c *Collector) AddInput(gs ...Input) error {
 	return nil
 }
 
+type InputFuncWrapper struct {
+	f InputFunc
+}
+
+func (iw *InputFuncWrapper) Gather(g Gather) {
+	iw.f(g)
+}
+
 // AddInputFunc adds an input function to the collector.
 func (c *Collector) AddInputFunc(input InputFunc) error {
-	// the first call to get the measurement name
-	g := &Gatherer{}
-	input(g)
-	if err := g.Err(); err != nil {
-		return err
-	}
-
-	c.Lock()
-	defer func() {
-		c.Unlock()
-		ts := nowFunc()
-		for _, m := range g.M {
-			m.ts = ts
-			c.receive(m)
-		}
-	}()
-
-	for _, m := range g.M {
-		if iw, exists := c.inputs[m.Name]; exists {
-			iw.inputs = append(iw.inputs, input)
-		} else {
-			iw := &InputWrapper{
-				measureName:    m.Name,
-				inputs:         []InputFunc{input},
-				mtsFields:      make(map[string]MultiTimeSeries),
-				publishedNames: make(map[string]string),
-			}
-			c.inputs[iw.measureName] = iw
-		}
-	}
-	return nil
+	return c.AddInput(&InputFuncWrapper{f: input})
 }
 
 func (c *Collector) Start() {
@@ -339,6 +354,20 @@ func (c *Collector) Stop() {
 	c.stopWg.Wait()
 	close(c.recvCh)
 	c.syncStorage()
+	// call DeInit() of inputs if exists
+	for _, iw := range c.inputs {
+		for _, input := range iw.inputs {
+			if hasDeInit, ok := input.(interface{ DeInit() error }); ok {
+				hasDeInit.DeInit()
+			}
+		}
+	}
+	// call DeInit() of outputs if exists
+	for _, out := range c.outputs {
+		if hasDeInit, ok := out.(interface{ DeInit() }); ok {
+			hasDeInit.DeInit()
+		}
+	}
 }
 
 func (c *Collector) makePublishName(measureName, fieldName string) string {
@@ -393,7 +422,7 @@ func (c *Collector) runInputs(ts time.Time) {
 		} else {
 			gather := &Gatherer{}
 			for _, input := range iw.inputs {
-				input(gather)
+				input.Gather(gather)
 			}
 			if err := gather.Err(); err != nil {
 				fmt.Printf("Error measuring: %v\n", err)
@@ -484,8 +513,8 @@ func (c *Collector) onProduct(tb TimeBin, meta any) {
 		IsNull:  tb.IsNull,
 		Value:   tb.Value,
 	}
-	for _, lsnr := range c.outputs {
-		lsnr(data)
+	for _, out := range c.outputs {
+		out.Process(data)
 	}
 }
 
