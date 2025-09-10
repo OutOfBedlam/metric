@@ -10,8 +10,8 @@ import (
 )
 
 type Storage interface {
-	Store(field string, series string, ts *TimeSeries) error
-	Load(field string, series string) (*TimeSeries, error)
+	Store(metricName string, series string, ts *TimeSeries) error
+	Load(metricName string, series string) (*TimeSeries, error)
 }
 
 func NewFileStorage(dir string) *FileStorage {
@@ -27,8 +27,8 @@ type FileStorage struct {
 
 var _ Storage = (*FileStorage)(nil)
 
-func (ds *FileStorage) Store(field string, seriesName string, ts *TimeSeries) error {
-	filename := fmt.Sprintf("%s_%s.metric", field, seriesName)
+func (ds *FileStorage) Store(metricName string, seriesName string, ts *TimeSeries) error {
+	filename := fmt.Sprintf("%s_%s.metric", metricName, seriesName)
 	path := filepath.Join(ds.dir, cleanPath(filename))
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
@@ -45,8 +45,8 @@ func (ds *FileStorage) Store(field string, seriesName string, ts *TimeSeries) er
 	return nil
 }
 
-func (ds *FileStorage) Load(field string, seriesName string) (*TimeSeries, error) {
-	filename := fmt.Sprintf("%s_%s.metric", field, seriesName)
+func (ds *FileStorage) Load(metricName string, seriesName string) (*TimeSeries, error) {
+	filename := fmt.Sprintf("%s_%s.metric", metricName, seriesName)
 	path := filepath.Join(ds.dir, cleanPath(filename))
 	f, err := os.Open(path)
 	if err != nil {

@@ -18,26 +18,26 @@ type InputFunc func(*Gather) error
 type OutputFunc func(Product) error
 
 type Gather struct {
-	fields []Field
-	ts     time.Time
-	noop   bool
+	measures []Measure
+	ts       time.Time
+	noop     bool
 }
 
 func (g *Gather) Add(name string, value float64, typ Type) {
-	g.fields = append(g.fields, Field{Name: name, Value: value, Type: typ})
+	g.measures = append(g.measures, Measure{Name: name, Value: value, Type: typ})
 }
 
 func (g *Gather) Filter(filter Filter) {
-	var fields []Field
-	for _, f := range g.fields {
+	var ms []Measure
+	for _, f := range g.measures {
 		if filter == nil || filter.Match(f.Name) {
-			fields = append(fields, f)
+			ms = append(ms, f)
 		}
 	}
-	g.fields = fields
+	g.measures = ms
 }
 
-type Field struct {
+type Measure struct {
 	Name  string
 	Value float64
 	Type  Type
@@ -100,7 +100,7 @@ func TimerType(u Unit) Type {
 	}
 }
 
-type FieldInfo struct {
+type SeriesInfo struct {
 	Name   string
 	Series string
 	Period time.Duration
@@ -113,7 +113,7 @@ type Collector struct {
 
 	inputs     []Input                    // registered input
 	outputs    []Output                   // registered output
-	timeseries map[string]MultiTimeSeries // field_name: multi-timeseries
+	timeseries map[string]MultiTimeSeries // measurement_name: multi-timeseries
 
 	// only data that match the filter will be stored
 	timeseriesFilter Filter
@@ -407,19 +407,19 @@ func (c *Collector) Stop() {
 	}
 }
 
-func (c *Collector) makePublishName(fieldName string) string {
+func (c *Collector) makePublishName(metricName string) string {
 	var prefix string
 	if c.expvarPrefix != "" {
 		prefix = c.expvarPrefix + ":"
 	}
-	return fmt.Sprintf("%s%s", prefix, fieldName)
+	return fmt.Sprintf("%s%s", prefix, metricName)
 }
 
 // Send processes a measurement sent to the collector.
-func (c *Collector) Send(fields ...Field) {
+func (c *Collector) Send(measurements ...Measure) {
 	g := &Gather{
-		fields: fields,
-		ts:     nowFunc(),
+		measures: measurements,
+		ts:       nowFunc(),
 	}
 	c.recvCh <- g
 }
@@ -464,20 +464,20 @@ func (c *Collector) receive(m *Gather) {
 		return
 	}
 
-	for _, field := range m.fields {
-		if c.timeseriesFilter != nil && !c.timeseriesFilter.Match(field.Name) {
+	for _, measure := range m.measures {
+		if c.timeseriesFilter != nil && !c.timeseriesFilter.Match(measure.Name) {
 			continue
 		}
 		var mts MultiTimeSeries
-		if fm, exists := c.timeseries[field.Name]; exists {
+		if fm, exists := c.timeseries[measure.Name]; exists {
 			mts = fm
 		} else {
-			mts = c.makeMultiTimeSeries(field)
-			c.timeseries[field.Name] = mts
-			publishName := c.makePublishName(field.Name)
+			mts = c.makeMultiTimeSeries(measure)
+			c.timeseries[measure.Name] = mts
+			publishName := c.makePublishName(measure.Name)
 			expvar.Publish(publishName, mts)
 		}
-		mts.AddTime(m.ts, field.Value)
+		mts.AddTime(m.ts, measure.Value)
 	}
 }
 
@@ -497,44 +497,44 @@ func (c *Collector) onProduct(tb TimeBin, meta any) {
 		return
 	}
 
-	field, ok := meta.(FieldInfo)
+	mInfo, ok := meta.(SeriesInfo)
 	if !ok {
 		return
 	}
 
 	data := Product{
-		Name:   field.Name,
+		Name:   mInfo.Name,
 		Time:   tb.Time,
 		Value:  tb.Value,
 		IsNull: tb.IsNull,
-		Series: field.Series,
-		Period: field.Period,
-		Type:   field.Type,
-		Unit:   field.Unit,
+		Series: mInfo.Series,
+		Period: mInfo.Period,
+		Type:   mInfo.Type,
+		Unit:   mInfo.Unit,
 	}
 	for _, out := range c.outputs {
 		if err := out.Process(data); err != nil {
-			fmt.Printf("Error processing output for %s: %v\n", field.Name, err)
+			fmt.Printf("Error processing output for %s: %v\n", mInfo.Name, err)
 		}
 	}
 }
 
-func (c *Collector) makeMultiTimeSeries(field Field) MultiTimeSeries {
+func (c *Collector) makeMultiTimeSeries(measure Measure) MultiTimeSeries {
 	mts := make(MultiTimeSeries, len(c.series))
 	for i, ser := range c.series {
-		var ts = NewTimeSeries(ser.Period, ser.MaxCount, field.Type.Producer())
+		var ts = NewTimeSeries(ser.Period, ser.MaxCount, measure.Type.Producer())
 		ts.SetListener(c.onProduct)
-		ts.SetMeta(FieldInfo{
-			Name:   field.Name,
+		ts.SetMeta(SeriesInfo{
+			Name:   measure.Name,
 			Series: ser.Name,
 			Period: ser.Period,
-			Type:   field.Type.String(),
-			Unit:   field.Type.Unit(),
+			Type:   measure.Type.String(),
+			Unit:   measure.Type.Unit(),
 		})
 		if c.storage != nil {
 			seriesName := cleanPath(ts.interval.String())
-			if data, err := c.storage.Load(field.Name, seriesName); err != nil {
-				fmt.Printf("Failed to load time series for %s %s: %v\n", field.Name, ser.Name, err)
+			if data, err := c.storage.Load(measure.Name, seriesName); err != nil {
+				fmt.Printf("Failed to load time series for %s %s: %v\n", measure.Name, ser.Name, err)
 			} else if data != nil {
 				// if file is not exists, data will be nil
 				ts.data = data.data
@@ -574,8 +574,8 @@ func (c *Collector) MetricNames() []string {
 	return names
 }
 
-// Timeseries returns the MultiTimeSeries for the specified field name.
-// If the field does not exist, it returns nil.
+// Timeseries returns the MultiTimeSeries for the specified measurement name.
+// If the measurement does not exist, it returns nil.
 func (c *Collector) Timeseries(name string) MultiTimeSeries {
 	c.Lock()
 	defer c.Unlock()
@@ -590,12 +590,12 @@ func (c *Collector) Series() []CollectorSeries {
 	return ret
 }
 
-// Inflight returns the current collecting data for each series of the specified measure and field.
+// Inflight returns the current collecting data for each series of the specified measurement.
 // The key of the returned map is the series name.
-// If the measure or field does not exist, it returns ErrMetricNotFound.
-func (c *Collector) Inflight(field string) (map[string]Product, error) {
+// If the measurement does not exist, it returns ErrMetricNotFound.
+func (c *Collector) Inflight(measureName string) (map[string]Product, error) {
 	var mts MultiTimeSeries
-	if m, ok := c.timeseries[field]; !ok {
+	if m, ok := c.timeseries[measureName]; !ok {
 		return nil, ErrMetricNotFound
 	} else {
 		mts = m
@@ -604,10 +604,10 @@ func (c *Collector) Inflight(field string) (map[string]Product, error) {
 	ret := map[string]Product{}
 	for idx, n := range c.series {
 		seriesName := n.Name
-		nfo, ok := mts[idx].Meta().(FieldInfo)
+		nfo, ok := mts[idx].Meta().(SeriesInfo)
 		if !ok {
-			return nil, fmt.Errorf("metric %s series %s meta is not FieldInfo, but %T",
-				field, seriesName, mts[idx].Meta())
+			return nil, fmt.Errorf("metric %s series %s meta is not MeasurementInfo, but %T",
+				measureName, seriesName, mts[idx].Meta())
 		}
 		ts, prd := mts[idx].Last()
 		ret[seriesName] = Product{

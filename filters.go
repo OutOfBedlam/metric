@@ -11,6 +11,10 @@ type Filter interface {
 	Match(string) bool
 }
 
+func IsFilterPattern(s string) bool {
+	return strings.ContainsAny(s, "*?[]")
+}
+
 // Compile compiles a list of glob patterns into a Filter.
 //
 // f, _ := Compile([]string{"abc", "def", "ghi*"})
@@ -27,10 +31,10 @@ type Filter interface {
 // f.Match("abc:opq:xyz:ghi") => false
 //
 // if the patterns contains brackets with digits, it can be used to match range of numbers
-// e.g. "metric:field[0-3]" matches "metric:field0", "metric:field1", "metric:field2", "metric:field3"
+// e.g. "metric:name[0-3]" matches "metric:name0", "metric:name1", "metric:name2", "metric:name3"
 //
-//	"metric:field[1-3]" matches "metric:field1", "metric:field2", "metric:field3"
-//	"metric:field[2-4]" matches "metric:field2", "metric:field3", "metric:field4"
+//	"metric:name[1-3]" matches "metric:name1", "metric:name2", "metric:name3"
+//	"metric:name[2-4]" matches "metric:name2", "metric:name3", "metric:name4"
 func Compile(filters []string, separators ...rune) (Filter, error) {
 	if len(filters) == 0 {
 		return nil, nil

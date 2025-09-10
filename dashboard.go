@@ -39,27 +39,43 @@ type Dashboard struct {
 }
 
 type Chart struct {
-	MetricNames      []string
-	MetricNameFilter Filter // pattern to match metric names, e.g., "net:*"
-	ValueSelector    Filter // pattern to match field names, e.g., "*(avg)"
-	ID               string
-	Title            string
-	SubTitle         string
-	Type             ChartType // e.g., line, bar
+	MetricNames    []string
+	SeriesSelector Filter // pattern to match field names, e.g., "*(avg)"
+	ID             string
+	Title          string
+	SubTitle       string
+	Type           ChartType // e.g., line, bar
+
+	metricNameFilter Filter
 }
 
 // multiple metric names can be added in one place to group them together
 // those series are shown together in one graph
-func (d *Dashboard) AddChart(co ...Chart) {
+func (d *Dashboard) AddChart(co ...Chart) error {
 	for _, c := range co {
 		if c.ID == "" {
 			c.ID = fmt.Sprintf("@%d", len(d.Charts)+1)
 		}
 		if c.Title == "" {
-			c.Title = strings.Join(c.MetricNames, ", ")
+			c.Title = fmt.Sprintf("NoTitle-%s", c.ID)
+		}
+		hasPattern := false
+		for _, n := range c.MetricNames {
+			if IsFilterPattern(n) {
+				hasPattern = true
+				break
+			}
+		}
+		if hasPattern {
+			if f, err := Compile(c.MetricNames, ':'); err != nil {
+				return fmt.Errorf("error compiling metric name filter %v: %w", c.MetricNames, err)
+			} else {
+				c.metricNameFilter = f
+			}
 		}
 		d.Charts = append(d.Charts, c)
 	}
+	return nil
 }
 
 func (d Dashboard) Panels() []Chart {
@@ -69,7 +85,7 @@ func (d Dashboard) Panels() []Chart {
 	ret := []Chart{}
 	for idx := range d.Charts {
 		po := &d.Charts[idx]
-		if po.MetricNameFilter != nil {
+		if po.metricNameFilter != nil {
 			d.refreshPanel(po)
 			// remove matched names from lst
 			for _, name := range po.MetricNames {
@@ -95,13 +111,13 @@ func (d Dashboard) Panels() []Chart {
 }
 
 func (d Dashboard) refreshPanel(po *Chart) {
-	if po.MetricNameFilter == nil {
+	if po.metricNameFilter == nil {
 		return
 	}
 	lst := d.nameProvider()
 	slices.Sort(lst)
 	for _, name := range lst {
-		if po.MetricNameFilter.Match(name) {
+		if po.metricNameFilter.Match(name) {
 			if !slices.Contains(po.MetricNames, name) {
 				po.MetricNames = append(po.MetricNames, name)
 			}
@@ -313,12 +329,12 @@ func (d Dashboard) HandleData(w http.ResponseWriter, r *http.Request) {
 			MetricNames: []string{id},
 		}
 	}
-	if panelOpt.MetricNameFilter != nil {
+	if panelOpt.metricNameFilter != nil {
 		d.refreshPanel(&panelOpt)
 	}
 
 	var series []Series
-	var meta *FieldInfo
+	var meta *SeriesInfo
 	var seriesMaxCount int
 	var seriesInterval time.Duration
 	var notFound bool = true
@@ -326,7 +342,7 @@ func (d Dashboard) HandleData(w http.ResponseWriter, r *http.Request) {
 		ss, ssExists := d.getSnapshot(metricName, tsIdx)
 
 		if !ssExists {
-			panelOpt.SubTitle = "Metric not found"
+			panelOpt.SubTitle = "Metric not found: " + metricName
 			continue
 		}
 		notFound = false
@@ -345,6 +361,7 @@ func (d Dashboard) HandleData(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Metric not found", http.StatusNotFound)
 		return
 	}
+	trimSeriesNames(series)
 	var seriesSingleOrArray any
 	if len(series) == 1 {
 		seriesSingleOrArray = series[0]
@@ -414,6 +431,85 @@ type Series struct {
 	AreaStyle  map[string]any `json:"areaStyle,omitempty"` // {}
 }
 
+// trimSeriesNames trims the series names to remove common prefixes and suffixes of all series' names
+// the suffix and prefix are determined by longest common prefix/suffix of all series' names
+// that has at least one colon(':') separator before and after it
+// For example,
+// e.g., "cpu:cpu_user:avg", "cpu:cpu_system:avg" => "user", "system"
+// e.g.,  "go:goroutines", "go:threads" => "goroutines", "threads"
+func trimSeriesNames(series []Series) {
+	trimSeriesNamesSeparator(series, ":")
+	trimSeriesNamesSeparator(series, "#")
+
+}
+
+func trimSeriesNamesSeparator(series []Series, separator string) {
+	if len(series) <= 0 {
+		return
+	}
+	names := make([]string, len(series))
+	for i, s := range series {
+		names[i] = s.Name
+	}
+
+	// Find common prefix (colon-separated)
+	prefixParts := strings.Split(names[0], separator)
+	for i := 1; i < len(names); i++ {
+		parts := strings.Split(names[i], separator)
+		max := len(prefixParts)
+		if len(parts) < max {
+			max = len(parts)
+		}
+		j := 0
+		for ; j < max; j++ {
+			if parts[j] != prefixParts[j] {
+				break
+			}
+		}
+		prefixParts = prefixParts[:j]
+	}
+	prefix := strings.Join(prefixParts, separator)
+	if prefix != "" {
+		prefix += separator
+	}
+
+	// Find common suffix (colon-separated)
+	suffixParts := strings.Split(names[0], separator)
+	for i := 1; i < len(names); i++ {
+		parts := strings.Split(names[i], separator)
+		max := len(suffixParts)
+		if len(parts) < max {
+			max = len(parts)
+		}
+		j := 0
+		for ; j < max; j++ {
+			if parts[len(parts)-1-j] != suffixParts[len(suffixParts)-1-j] {
+				break
+			}
+		}
+		suffixParts = suffixParts[len(suffixParts)-j:]
+	}
+	suffix := strings.Join(suffixParts, separator)
+	if suffix != "" {
+		suffix = separator + suffix
+	}
+
+	for i, s := range series {
+		name := s.Name
+		// Remove prefix if it ends with ':' and is not empty
+		if prefix != "" && strings.HasPrefix(name, prefix) {
+			name = name[len(prefix):]
+		}
+		// Remove suffix if it starts with ':' and is not empty
+		if suffix != "" && strings.HasSuffix(name, suffix) {
+			name = name[:len(name)-len(suffix)]
+		}
+		name = strings.Trim(name, separator+"_ ")
+		series[i].Name = name
+	}
+	return
+}
+
 type ChartType string
 
 const (
@@ -461,10 +557,10 @@ func (ss Snapshot) Series(opt Chart) []Series {
 		}
 	case "gauge":
 		// for gauge, show avg and last value
-		seriesNames := []string{ss.Meta.Name + "(avg)", ss.Meta.Name + "(last)"}
+		seriesNames := []string{ss.Meta.Name + "#avg", ss.Meta.Name + "#last"}
 		seriesFlags := map[string]int{}
 		for i, seriesName := range seriesNames {
-			if opt.ValueSelector != nil && !opt.ValueSelector.Match(seriesName) {
+			if opt.SeriesSelector != nil && !opt.SeriesSelector.Match(seriesName) {
 				continue
 			}
 			switch i {
@@ -537,7 +633,7 @@ func (ss Snapshot) Series(opt Chart) []Series {
 				pName = pName[:len(pName)-1]
 			}
 			series = append(series, Series{
-				Name:       ss.Meta.Name + "(" + pName + ")",
+				Name:       ss.Meta.Name + "#" + pName,
 				Type:       "line",
 				Data:       make([]Item, len(ss.Times)),
 				Smooth:     true,
@@ -586,7 +682,7 @@ type Snapshot struct {
 	Values      []Value
 	Interval    time.Duration
 	MaxCount    int
-	Meta        FieldInfo
+	Meta        SeriesInfo
 }
 
 func (d Dashboard) getSnapshot(expvarKey string, tsIdx int) (Snapshot, bool) {
@@ -607,7 +703,7 @@ func (d Dashboard) getSnapshot(expvarKey string, tsIdx int) (Snapshot, bool) {
 			Values:      values,
 			Interval:    ts.Interval(),
 			MaxCount:    ts.MaxCount(),
-			Meta:        ts.Meta().(FieldInfo),
+			Meta:        ts.Meta().(SeriesInfo),
 		}
 	}
 	return ret, true
