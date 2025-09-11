@@ -108,6 +108,18 @@ type SeriesInfo struct {
 	Unit   Unit
 }
 
+func (si *SeriesInfo) H() map[string]any {
+	if si == nil {
+		return nil
+	}
+	return H{
+		"name":   si.Name,
+		"series": si.Series,
+		"unit":   si.Unit,
+		"type":   si.Type,
+	}
+}
+
 type Collector struct {
 	sync.Mutex
 

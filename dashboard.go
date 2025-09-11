@@ -338,11 +338,12 @@ func (d Dashboard) HandleData(w http.ResponseWriter, r *http.Request) {
 	var seriesMaxCount int
 	var seriesInterval time.Duration
 	var notFound bool = true
+	var notFoundNames []string
 	for _, metricName := range panelOpt.MetricNames {
 		ss, ssExists := d.getSnapshot(metricName, tsIdx)
 
 		if !ssExists {
-			panelOpt.SubTitle = "Metric not found: " + metricName
+			notFoundNames = append(notFoundNames, metricName)
 			continue
 		}
 		notFound = false
@@ -357,12 +358,14 @@ func (d Dashboard) HandleData(w http.ResponseWriter, r *http.Request) {
 			panelOpt.Title = ss.PublishName
 		}
 	}
+	var seriesSingleOrArray any
 	if notFound {
-		http.Error(w, "Metric not found", http.StatusNotFound)
-		return
+		// TODO: show not found message in the chart area instead of returning 404
+		_ = notFoundNames
+		// http.Error(w, "Metric not found", http.StatusNotFound)
+		// return
 	}
 	trimSeriesNames(series)
-	var seriesSingleOrArray any
 	if len(series) == 1 {
 		seriesSingleOrArray = series[0]
 	} else {
@@ -391,12 +394,7 @@ func (d Dashboard) HandleData(w http.ResponseWriter, r *http.Request) {
 		},
 		"interval": seriesInterval.Milliseconds(),
 		"maxCount": seriesMaxCount,
-		"meta": H{
-			"name":   meta.Name,
-			"series": meta.Series,
-			"unit":   meta.Unit,
-			"type":   meta.Type,
-		},
+		"meta":     meta.H(),
 	})
 	if err != nil {
 		http.Error(w, "Error encoding JSON: "+err.Error(), http.StatusInternalServerError)
@@ -440,7 +438,6 @@ type Series struct {
 func trimSeriesNames(series []Series) {
 	trimSeriesNamesSeparator(series, ":")
 	trimSeriesNamesSeparator(series, "#")
-
 }
 
 func trimSeriesNamesSeparator(series []Series, separator string) {
@@ -507,7 +504,6 @@ func trimSeriesNamesSeparator(series []Series, separator string) {
 		name = strings.Trim(name, separator+"_ ")
 		series[i].Name = name
 	}
-	return
 }
 
 type ChartType string
