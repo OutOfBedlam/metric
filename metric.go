@@ -43,7 +43,7 @@ type Measure struct {
 	Type  Type
 }
 
-// CounterType supports samples count, value (sum)
+// CounterType supports only value: sum
 func CounterType(u Unit) Type {
 	return Type{
 		p: func() Producer { return NewCounter() },
@@ -52,7 +52,7 @@ func CounterType(u Unit) Type {
 	}
 }
 
-// GaugeType supports samples count, sum, value (last)
+// GaugeType supports: avg, last
 func GaugeType(u Unit) Type {
 	return Type{
 		p: func() Producer { return NewGauge() },
@@ -61,7 +61,8 @@ func GaugeType(u Unit) Type {
 	}
 }
 
-// MeterType supports samples count, sum, first, last, min, max
+// MeterType supports: avg, first, last, min, max, ohlc
+// OHLC is represented as a slice of 4 values: [open, close, lowest, highest]
 func MeterType(u Unit) Type {
 	return Type{
 		p: func() Producer { return NewMeter() },
@@ -70,11 +71,16 @@ func MeterType(u Unit) Type {
 	}
 }
 
-// OdometerType supports samples count, quantiles
-func HistogramType(u Unit) Type {
-	return HistogramTypePercentiles(u, 100, 0.5, 0.90, 0.99)
+// TimerType supports: avg, min, max in time.Duration
+func TimerType() Type {
+	return Type{
+		p: func() Producer { return NewTimer() },
+		s: "timer",
+		u: UnitDuration,
+	}
 }
 
+// OdometerType supports: first, last, diff, non-negative-diff, abs-diff
 func OdometerType(u Unit) Type {
 	return Type{
 		p: func() Producer { return NewOdometer() },
@@ -83,19 +89,19 @@ func OdometerType(u Unit) Type {
 	}
 }
 
+// HistogramType supports: p[1-999] percentiles e.g. p50, p90, p99
+func HistogramType(u Unit) Type {
+	return HistogramTypePercentiles(u, 100, 0.5, 0.90, 0.99)
+}
+
+// HistogramTypePercentiles supports: p[1-999] percentiles e.g. p50, p90, p99
+// maxBin is the maximum number of bins to use for the histogram.
+// ps is the list of percentiles to calculate, in the range (0, 1).
+// e.g., 0.5 for p50, 0.75 for p75, 0.9 for p90, 0.99 for p99, 0.999 for p999.
 func HistogramTypePercentiles(u Unit, maxBin int, ps ...float64) Type {
 	return Type{
 		p: func() Producer { return NewHistogram(maxBin, ps...) },
 		s: "histogram",
-		u: u,
-	}
-}
-
-// TimerType supports samples count, total, min, max
-func TimerType(u Unit) Type {
-	return Type{
-		p: func() Producer { return NewTimer() },
-		s: "timer",
 		u: u,
 	}
 }

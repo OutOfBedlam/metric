@@ -550,6 +550,8 @@ func (ss Snapshot) Series(opt Chart) []Series {
 		return ss.gaugeToSeries(opt)
 	case "meter":
 		return ss.meterToSeries(opt)
+	case "timer":
+		return ss.timerToSeries(opt)
 	case "odometer":
 		return ss.odometerToSeries(opt)
 	case "histogram":
@@ -615,21 +617,13 @@ func (ss Snapshot) gaugeToSeries(opt Chart) []Series {
 
 func (ss Snapshot) meterToSeries(opt Chart) []Series {
 	var series []Series
-	typ, stack := opt.Type.TypeAndStack("line")
-	allFieldNames := []string{"min", "max", "avg", "first", "last"}
-	if opt.fieldNameFilter == nil {
-		// if no field filter, always shows the candlestick
-		// which requires all fields together
-		// so add "_meter_" to the field names to indicate that
-		// it is a special field name to show candlestick which requires all fields together
-		allFieldNames = []string{"_meter_"}
-		// force to candlestick type whatever the requested type is
-		typ, stack = "candlestick", nil
-	}
+	reqTyp, reqStack := opt.Type.TypeAndStack("line")
+	allFieldNames := []string{"ohlc", "min", "max", "avg", "first", "last"}
 	for _, fieldName := range allFieldNames {
 		if opt.fieldNameFilter != nil && !opt.fieldNameFilter.Match(fieldName) {
 			continue
 		}
+		typ, stack := reqTyp, reqStack
 		data := make([]Item, len(ss.Times))
 		for i, tm := range ss.Times {
 			data[i].Time = tm.UnixMilli()
@@ -648,9 +642,47 @@ func (ss Snapshot) meterToSeries(opt Chart) []Series {
 				data[i].Value = v.Last
 			case "avg":
 				data[i].Value = v.Sum / float64(v.Samples)
-			case "_meter_":
+			case "ohlc":
+				// force to candlestick type whatever the requested type is
+				typ, stack = "candlestick", nil
 				// data order [open, close, lowest, highest]
 				data[i].Value = []any{v.First, v.Last, v.Min, v.Max}
+			}
+		}
+		series = append(series, Series{
+			Name:       ss.Meta.Name + "#" + fieldName,
+			Type:       typ,
+			Data:       data,
+			Stack:      stack,
+			Smooth:     true,
+			ShowSymbol: opt.ShowSymbol,
+		})
+	}
+	return series
+}
+
+func (ss Snapshot) timerToSeries(opt Chart) []Series {
+	var series []Series
+	typ, stack := opt.Type.TypeAndStack("line")
+	allFieldNames := []string{"min", "max", "avg"}
+	for _, fieldName := range allFieldNames {
+		if opt.fieldNameFilter != nil && !opt.fieldNameFilter.Match(fieldName) {
+			continue
+		}
+		data := make([]Item, len(ss.Times))
+		for i, tm := range ss.Times {
+			data[i].Time = tm.UnixMilli()
+			v, ok := ss.Values[i].(*TimerValue)
+			if !ok || v.Samples == 0 {
+				continue
+			}
+			switch fieldName {
+			case "min":
+				data[i].Value = v.MinDuration
+			case "max":
+				data[i].Value = v.MaxDuration
+			case "avg":
+				data[i].Value = v.SumDuration / time.Duration(v.Samples)
 			}
 		}
 		series = append(series, Series{
@@ -668,10 +700,10 @@ func (ss Snapshot) meterToSeries(opt Chart) []Series {
 func (ss Snapshot) odometerToSeries(opt Chart) []Series {
 	var series []Series
 	typ, stack := opt.Type.TypeAndStack("bar")
-	allFieldNames := []string{"diff", "non-negative-diff", "abs-diff"}
+	allFieldNames := []string{"first", "last", "diff", "non-negative-diff", "abs-diff"}
 	if opt.fieldNameFilter == nil {
 		// if no field filter, always shows the "diff" field only
-		allFieldNames = []string{"diff"}
+		allFieldNames = []string{"last"}
 	}
 	for _, fieldName := range allFieldNames {
 		if opt.fieldNameFilter != nil && !opt.fieldNameFilter.Match(fieldName) {
@@ -685,6 +717,10 @@ func (ss Snapshot) odometerToSeries(opt Chart) []Series {
 				continue
 			}
 			switch fieldName {
+			case "first":
+				data[i].Value = v.First
+			case "last":
+				data[i].Value = v.Last
 			case "diff":
 				data[i].Value = v.Diff()
 			case "non-negative-diff":
