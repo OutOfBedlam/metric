@@ -4,6 +4,7 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"log/slog"
 	"math"
 	"strings"
 	"sync"
@@ -148,17 +149,11 @@ type Collector struct {
 	C chan<- *Gather
 
 	// time series configuration
-	series       []CollectorSeries
+	series       []SeriesID
 	expvarPrefix string
 
 	// persistent storage
 	storage Storage
-}
-
-type CollectorSeries struct {
-	Name     string
-	Period   time.Duration
-	MaxCount int
 }
 
 // NewCollector creates a new Collector with the specified interval.
@@ -194,7 +189,8 @@ func WithSamplingInterval(interval time.Duration) CollectorOption {
 
 func WithSeries(name string, period time.Duration, maxCount int) CollectorOption {
 	return func(c *Collector) {
-		c.series = append(c.series, CollectorSeries{Name: name, Period: period, MaxCount: maxCount})
+		id := regexpInvalidSeriesID.ReplaceAllString(name, "_")
+		c.series = append(c.series, NewSeriesID(id, name, period, maxCount))
 	}
 }
 
@@ -448,14 +444,14 @@ func (c *Collector) runInputs(ts time.Time) {
 	// so we need to recover from panic.
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Println("Recovered in runInputs:", r)
+			slog.Error("Recovered in runInputs", "error", r)
 		}
 	}()
 
 	for _, input := range c.inputs {
 		gather := &Gather{}
 		if err := input.Gather(gather); err != nil {
-			fmt.Printf("Error measuring: %v\n", err)
+			slog.Error("Error gathering metrics", "error", err)
 			continue
 		}
 		gather.ts = ts
@@ -511,28 +507,13 @@ type Product struct {
 }
 
 func (c *Collector) onProduct(tb TimeBin, meta any) {
-	if len(c.outputs) == 0 {
+	var prd Product
+	if ok := ToProduct(&prd, tb, meta); !ok {
 		return
-	}
-
-	mInfo, ok := meta.(SeriesInfo)
-	if !ok {
-		return
-	}
-
-	data := Product{
-		Name:   mInfo.Name,
-		Time:   tb.Time,
-		Value:  tb.Value,
-		IsNull: tb.IsNull,
-		Series: mInfo.Series,
-		Period: mInfo.Period,
-		Type:   mInfo.Type,
-		Unit:   mInfo.Unit,
 	}
 	for _, out := range c.outputs {
-		if err := out.Process(data); err != nil {
-			fmt.Printf("Error processing output for %s: %v\n", mInfo.Name, err)
+		if err := out.Process(prd); err != nil {
+			slog.Error("Error processing output", "name", prd.Name, "error", err)
 		}
 	}
 }
@@ -540,22 +521,19 @@ func (c *Collector) onProduct(tb TimeBin, meta any) {
 func (c *Collector) makeMultiTimeSeries(measure Measure) MultiTimeSeries {
 	mts := make(MultiTimeSeries, len(c.series))
 	for i, ser := range c.series {
-		var ts = NewTimeSeries(ser.Period, ser.MaxCount, measure.Type.Producer())
+		var ts = NewTimeSeries(ser.Period(), ser.MaxCount(), measure.Type.Producer())
 		ts.SetListener(c.onProduct)
+		ts.SetStorage(c.storage)
 		ts.SetMeta(SeriesInfo{
 			Name:   measure.Name,
-			Series: ser.Name,
-			Period: ser.Period,
+			Series: ser.Name(),
+			Period: ser.Period(),
 			Type:   measure.Type.String(),
 			Unit:   measure.Type.Unit(),
 		})
 		if c.storage != nil {
-			seriesName := cleanPath(ts.interval.String())
-			if data, err := c.storage.Load(measure.Name, seriesName); err != nil {
-				fmt.Printf("Failed to load time series for %s %s: %v\n", measure.Name, ser.Name, err)
-			} else if data != nil {
-				// if file is not exists, data will be nil
-				ts.data = data.data
+			if err := ts.Restore(c.storage, measure.Name, ser); err != nil {
+				slog.Error("Failed to restore time series", "measure", measure.Name, "series", ser.Name(), "error", err)
 			}
 		}
 		mts[i] = ts
@@ -600,10 +578,10 @@ func (c *Collector) Timeseries(name string) MultiTimeSeries {
 	return c.timeseries[name]
 }
 
-func (c *Collector) Series() []CollectorSeries {
+func (c *Collector) Series() []SeriesID {
 	c.Lock()
 	defer c.Unlock()
-	ret := make([]CollectorSeries, len(c.series))
+	ret := make([]SeriesID, len(c.series))
 	copy(ret, c.series)
 	return ret
 }
@@ -621,7 +599,7 @@ func (c *Collector) Inflight(measureName string) (map[string]Product, error) {
 
 	ret := map[string]Product{}
 	for idx, n := range c.series {
-		seriesName := n.Name
+		seriesName := n.Name()
 		nfo, ok := mts[idx].Meta().(SeriesInfo)
 		if !ok {
 			return nil, fmt.Errorf("metric %s series %s meta is not MeasurementInfo, but %T",
@@ -647,12 +625,18 @@ func (c *Collector) syncStorage() {
 	}
 	c.Lock()
 	defer c.Unlock()
-	for name, mts := range c.timeseries {
+	for _, id := range c.series {
+		mts, ok := c.timeseries[id.Name()]
+		if !ok {
+			continue
+		}
 		for _, ts := range mts {
-			seriesName := cleanPath(ts.interval.String())
-			err := c.storage.Store(name, seriesName, ts)
+			tb, meta := ts.LastBin()
+			var prd Product
+			ToProduct(&prd, tb, meta)
+			err := c.storage.Store(id, prd, true)
 			if err != nil {
-				fmt.Printf("Failed to store time series for %s %s %s: %v\n", name, ts.Meta(), seriesName, err)
+				slog.Error("Failed to store time series", "name", id.Name(), "error", err)
 			}
 		}
 	}

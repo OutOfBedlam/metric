@@ -6,6 +6,19 @@ import (
 	"time"
 )
 
+func NewTimer() *Timer {
+	return &Timer{}
+}
+
+func NewTimerWithValue(v *TimerValue) *Timer {
+	return &Timer{
+		samples:     v.Samples,
+		sumDuration: v.SumDuration,
+		minDuration: v.MinDuration,
+		maxDuration: v.MaxDuration,
+	}
+}
+
 type Timer struct {
 	sync.Mutex
 	samples     int64
@@ -15,10 +28,6 @@ type Timer struct {
 }
 
 var _ Producer = (*Timer)(nil)
-
-func NewTimer() *Timer {
-	return &Timer{}
-}
 
 func (t *Timer) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t.Produce(false))

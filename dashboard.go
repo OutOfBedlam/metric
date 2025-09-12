@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"runtime/debug"
 	"slices"
@@ -29,7 +30,7 @@ var _ http.Handler = (*Dashboard)(nil)
 type Dashboard struct {
 	Option             DashboardOption
 	Charts             []Chart
-	Timeseries         []CollectorSeries
+	Timeseries         []SeriesID
 	SeriesIdx          int
 	ShowRemains        bool
 	SamplingInterval   time.Duration
@@ -278,7 +279,7 @@ func (d Dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (d Dashboard) HandleFunc(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			fmt.Println("Recovered in Dashboard.Handle:", rec)
+			slog.Error("Recovered in Dashboard.Handle", "error", rec)
 			debug.PrintStack()
 			http.Error(w, fmt.Sprintf("Internal server error: %v", rec), http.StatusInternalServerError)
 		}
@@ -791,8 +792,8 @@ var tmplFuncMap = template.FuncMap{
 	"sub": func(a, b int) int {
 		return a - b
 	},
-	"seriesTitle": func(s CollectorSeries) string {
-		title := s.Name + " | " + s.Period.String()
+	"seriesTitle": func(s SeriesID) string {
+		title := s.Name() + " | " + s.Period().String()
 		if strings.HasSuffix(title, "m0s") {
 			title = strings.TrimSuffix(title, "0s")
 		}
