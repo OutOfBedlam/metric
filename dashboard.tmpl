@@ -74,6 +74,9 @@
                 lbl = trimRight(lbl);
                 return lbl + ' ' + sizes[i];
             } else {
+                if( value >= 0 && value < 1 ) {
+                    return (+value.toFixed(6)).toString();
+                }
                 return value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
             }
         }
