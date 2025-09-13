@@ -142,6 +142,9 @@ type DashboardOption struct {
 	Theme    string // "light" or "dark"
 	JsSrc    []string
 	Style    map[string]CSSStyle
+
+	panelMinWidth string
+	panelMaxWidth string
 }
 
 func DefaultDashboardOption() DashboardOption {
@@ -149,24 +152,23 @@ func DefaultDashboardOption() DashboardOption {
 		JsSrc: []string{
 			"https://cdn.jsdelivr.net/npm/echarts@6.0.0/dist/echarts.min.js",
 		},
-		Theme: "dark",
+		Theme:         "dark",
+		panelMinWidth: "400px", // match the .container style
+		panelMaxWidth: "1fr",   // match the .container style
 		Style: map[string]CSSStyle{
 			"body": {
 				"background": "rgb(38,40,49)",
 			},
 			".container": {
-				"display":         "flex",       // Enables Flexbox
-				"flex-wrap":       "wrap",       // Allows wrapping to the next line
-				"gap":             "10px",       // Adds spacing between panels
-				"justify-content": "flex-start", // Aligns panels to the left
+				"display":               "grid",                                 // Enables Flexbox
+				"grid-template-columns": "repeat(auto-fit, minmax(400px, 1fr))", // Responsive columns
+				"gap":                   "10px",                                 // Adds spacing between panels
+				"margin":                "0 auto",
 			},
 			".panel": {
-				"flex":          "1 1 400px", // Each panel takes up 400px width
-				"min-width":     "400px",     // Minimum width for each panel
-				"max-width":     "640px",     // Maximum width for each panel
-				"height":        "300px",     // Fixed height for each panel
 				"border-radius": "4px",
 				"padding":       "0px",
+				"height":        "300px",
 				"border":        "1px solid rgba(0,0,0,0.1)",
 				"box-shadow":    "2px 2px 5px rgba(0,0,0,0.1)",
 			},
@@ -237,21 +239,23 @@ func (d *Dashboard) SetTheme(theme string) {
 	d.Option.Theme = theme
 }
 
-func (d *Dashboard) SetPanelHeight(height int) {
+func (d *Dashboard) SetPanelHeight(height string) {
 	// "height":        "300px",     // Fixed height for each panel
-	d.Option.Style[".panel"]["height"] = fmt.Sprintf("%dpx", height)
+	d.Option.Style[".panel"]["height"] = fmt.Sprintf("%s", height)
 }
 
-func (d *Dashboard) SetPanelMinWidth(width int) {
-	// "flex":          "1 1 400px", // Each panel takes up 400px width
-	// "min-width":     "400px",     // Minimum width for each panel
-	d.Option.Style[".panel"]["flex"] = fmt.Sprintf("1 1 %dpx", width)
-	d.Option.Style[".panel"]["min-width"] = fmt.Sprintf("%dpx", width)
+func (d *Dashboard) SetPanelMinWidth(width string) {
+	// 	"grid-template-columns": "repeat(auto-fit, minmax(400px, 1fr))", // Responsive columns
+	d.Option.panelMinWidth = width
+	d.Option.Style[".container"]["grid-template-columns"] = fmt.Sprintf("repeat(auto-fit, minmax(%s, %s))",
+		width, d.Option.panelMaxWidth)
 }
 
-func (d *Dashboard) SetPanelMaxWidth(width int) {
-	// "max-width":     "640px",     // Maximum width for each panel
-	d.Option.Style[".panel"]["max-width"] = fmt.Sprintf("%dpx", width)
+func (d *Dashboard) SetPanelMaxWidth(width string) {
+	// 	"grid-template-columns": "repeat(auto-fit, minmax(400px, 1fr))", // Responsive columns
+	d.Option.panelMaxWidth = width
+	d.Option.Style[".container"]["grid-template-columns"] = fmt.Sprintf("repeat(auto-fit, minmax(%s, %s))",
+		d.Option.panelMinWidth, width)
 }
 
 func (opt DashboardOption) StyleCSS() template.CSS {
