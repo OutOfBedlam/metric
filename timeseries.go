@@ -78,14 +78,15 @@ func ToProduct(prd *Product, tb TimeBin, meta any) bool {
 		return false
 	}
 	*prd = Product{
-		Name:   mInfo.Name,
-		Time:   tb.Time,
-		Value:  tb.Value,
-		IsNull: tb.IsNull,
-		Series: mInfo.Series,
-		Period: mInfo.Period,
-		Type:   mInfo.Type,
-		Unit:   mInfo.Unit,
+		Name:        mInfo.MeasureName,
+		Time:        tb.Time,
+		Value:       tb.Value,
+		IsNull:      tb.IsNull,
+		SeriesID:    mInfo.SeriesID.ID(),
+		SeriesTitle: mInfo.SeriesID.Title(),
+		Period:      mInfo.SeriesID.Period(),
+		Type:        mInfo.MeasureType.Name(),
+		Unit:        mInfo.MeasureType.Unit(),
 	}
 	return true
 }
@@ -292,9 +293,12 @@ func (ts *TimeSeries) add(tm time.Time, val float64) {
 	if ts.storage != nil {
 		var prd Product
 		if ok := ToProduct(&prd, tb, ts.meta); ok {
-			seriesID := NewSeriesID(prd.Series, prd.Name, prd.Period, ts.maxCount)
-			if err := ts.storage.Store(seriesID, prd, false); err != nil {
-				slog.Error("Error storing metric", "name", prd.Name, "error", err)
+			if seriesID, err := NewSeriesID(prd.SeriesID, prd.Name, prd.Period, ts.maxCount); err != nil {
+				slog.Error("Error creating series ID", "name", prd.Name, "error", err)
+			} else {
+				if err := ts.storage.Store(seriesID, prd, false); err != nil {
+					slog.Error("Error storing metric", "name", prd.Name, "error", err)
+				}
 			}
 		}
 	}
@@ -420,7 +424,7 @@ func (ts *TimeSeries) UnmarshalJSON(data []byte) error {
 
 func (ts *TimeSeries) Restore(storage Storage, metricName string, series SeriesID) error {
 	if data, err := storage.Load(series, metricName); err != nil {
-		slog.Error("Failed to load time series", "metric", metricName, "series", series.Name(), "error", err)
+		slog.Error("Failed to load time series", "metric", metricName, "series", series.ID(), "error", err)
 	} else if len(data) > 0 {
 		// if file is not exists, data will be nil
 		ts.data = FromProduct(data)

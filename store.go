@@ -13,34 +13,76 @@ import (
 )
 
 type SeriesID struct {
-	name     string
 	id       string
+	title    string
 	maxCount int
 	period   time.Duration
-	valid    bool
+}
+
+func (id SeriesID) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		ID       string        `json:"id"`
+		Title    string        `json:"title"`
+		MaxCount int           `json:"max_count"`
+		Period   time.Duration `json:"period"`
+	}{
+		ID:       id.id,
+		Title:    id.title,
+		MaxCount: id.maxCount,
+		Period:   id.period,
+	})
+}
+
+func (id *SeriesID) UnmarshalJSON(data []byte) error {
+	obj := struct {
+		ID       string        `json:"id"`
+		Title    string        `json:"title"`
+		MaxCount int           `json:"max_count"`
+		Period   time.Duration `json:"period"`
+	}{}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return err
+	}
+	id.id = obj.ID
+	id.title = obj.Title
+	id.maxCount = obj.MaxCount
+	id.period = obj.Period
+	return nil
 }
 
 var regexpInvalidSeriesID = regexp.MustCompile(` [\\/:*?">?|\x00-\x1F]`)
 var regexpValidSeriesID = regexp.MustCompile("^[A-Z][A-Z0-9_]*[A-Z0-9]+$")
 
-func NewSeriesID(id string, name string, period time.Duration, maxCount int) SeriesID {
+// NewSeriesID creates a new SeriesID from the given id, title, period, and maxCount.
+//
+// The id is validated to ensure it contains only uppercase letters, numbers, and underscores,
+// and starts with a letter. Invalid characters are replaced with underscores.
+//
+// The title is a human-readable name for the series.
+//
+// The period is the duration of each data point in the series.
+//
+// The maxCount is the maximum number of data points to retain in the series.
+func NewSeriesID(id string, title string, period time.Duration, maxCount int) (SeriesID, error) {
+	// ensure the ID is uppercase and trimmed
+	// and validate it
+	id = regexpInvalidSeriesID.ReplaceAllString(id, "_")
+	id = strings.ToUpper(id)
 	ret := SeriesID{
-		name:     name,
 		id:       id,
+		title:    title,
 		maxCount: maxCount,
 		period:   period,
-		valid:    false,
 	}
 	ret.id = strings.ToUpper(strings.TrimSpace(id))
 	if !regexpValidSeriesID.MatchString(ret.id) {
-		return ret
+		return ret, fmt.Errorf("invalid series ID %q", id)
 	}
-	ret.valid = true
-	return ret
+	return ret, nil
 }
 
-func (id SeriesID) Name() string {
-	return id.name
+func (id SeriesID) Title() string {
+	return id.title
 }
 
 func (id SeriesID) ID() string {
@@ -59,10 +101,6 @@ func (id SeriesID) OldestTime() time.Time {
 	now := time.Now()
 	now = now.Add(id.period / 2).Round(id.period)
 	return now.Add(-id.period * time.Duration(id.maxCount))
-}
-
-func (id SeriesID) Valid() bool {
-	return id.valid
 }
 
 type Storage interface {
@@ -293,26 +331,28 @@ func (ds *FileStorage) Load(id SeriesID, name string) ([]Product, error) {
 
 func parseProduct(pd *Product, line string, includeValue bool) error {
 	obj := struct {
-		Name   string         `json:"name"`
-		Time   time.Time      `json:"ts"`
-		Value  map[string]any `json:"value"`
-		Series string         `json:"series"`
-		Period time.Duration  `json:"period"`
-		Type   string         `json:"type"`
-		Unit   Unit           `json:"unit"`
+		Name        string         `json:"name"`
+		Time        time.Time      `json:"ts"`
+		Value       map[string]any `json:"value"`
+		SeriesID    string         `json:"series_id"`
+		SeriesTitle string         `json:"series_title"`
+		Period      time.Duration  `json:"period"`
+		Type        string         `json:"type"`
+		Unit        Unit           `json:"unit"`
 	}{}
 	if err := json.Unmarshal([]byte(line), &obj); err != nil {
 		slog.Warn("Failed to unmarshal product from line", "line", line, "error", err)
 		return err
 	}
 	*pd = Product{
-		Name:   obj.Name,
-		Time:   obj.Time,
-		Value:  nil,
-		Series: obj.Series,
-		Period: obj.Period,
-		Type:   obj.Type,
-		Unit:   obj.Unit,
+		Name:        obj.Name,
+		Time:        obj.Time,
+		Value:       nil,
+		SeriesID:    obj.SeriesID,
+		SeriesTitle: obj.SeriesTitle,
+		Period:      obj.Period,
+		Type:        obj.Type,
+		Unit:        obj.Unit,
 	}
 	if !includeValue {
 		return nil

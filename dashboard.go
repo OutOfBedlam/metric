@@ -157,6 +157,7 @@ func DefaultDashboardOption() DashboardOption {
 		panelMaxWidth: "1fr",   // match the .container style
 		Style: map[string]CSSStyle{
 			"body": {
+				"width":      "calc(100% - 25px)",
 				"background": "rgb(38,40,49)",
 			},
 			".container": {
@@ -548,7 +549,7 @@ func (ct ChartType) TypeAndStack(fallback string) (string, any) {
 }
 
 func (ss Snapshot) Series(opt Chart) []Series {
-	switch ss.Meta.Type {
+	switch ss.Meta.MeasureType.Name() {
 	case "counter":
 		return ss.counterToSeries(opt)
 	case "gauge":
@@ -577,7 +578,7 @@ func (ss Snapshot) counterToSeries(opt Chart) []Series {
 		}
 	}
 	series = append(series, Series{
-		Name:       ss.Meta.Name,
+		Name:       ss.Meta.MeasureName,
 		Type:       typ,
 		Data:       data,
 		Stack:      stack,
@@ -609,7 +610,7 @@ func (ss Snapshot) gaugeToSeries(opt Chart) []Series {
 			}
 		}
 		series = append(series, Series{
-			Name:       ss.Meta.Name + "#" + fieldName,
+			Name:       ss.Meta.MeasureName + "#" + fieldName,
 			Type:       typ,
 			Data:       data,
 			Stack:      stack,
@@ -655,7 +656,7 @@ func (ss Snapshot) meterToSeries(opt Chart) []Series {
 			}
 		}
 		series = append(series, Series{
-			Name:       ss.Meta.Name + "#" + fieldName,
+			Name:       ss.Meta.MeasureName + "#" + fieldName,
 			Type:       typ,
 			Data:       data,
 			Stack:      stack,
@@ -691,7 +692,7 @@ func (ss Snapshot) timerToSeries(opt Chart) []Series {
 			}
 		}
 		series = append(series, Series{
-			Name:       ss.Meta.Name + "#" + fieldName,
+			Name:       ss.Meta.MeasureName + "#" + fieldName,
 			Type:       typ,
 			Data:       data,
 			Stack:      stack,
@@ -735,7 +736,7 @@ func (ss Snapshot) odometerToSeries(opt Chart) []Series {
 			}
 		}
 		series = append(series, Series{
-			Name:       ss.Meta.Name + "#" + fieldName,
+			Name:       ss.Meta.MeasureName + "#" + fieldName,
 			Type:       typ,
 			Stack:      stack,
 			Data:       data,
@@ -776,7 +777,7 @@ func (ss Snapshot) histogramToSeries(opt Chart) []Series {
 			data[i].Value = v.Values[pIdx]
 		}
 		series = append(series, Series{
-			Name:       ss.Meta.Name + "#" + fieldName,
+			Name:       ss.Meta.MeasureName + "#" + fieldName,
 			Type:       typ,
 			Stack:      stack,
 			Data:       data,
@@ -797,14 +798,7 @@ var tmplFuncMap = template.FuncMap{
 		return a - b
 	},
 	"seriesTitle": func(s SeriesID) string {
-		title := s.Name() + " | " + s.Period().String()
-		if strings.HasSuffix(title, "m0s") {
-			title = strings.TrimSuffix(title, "0s")
-		}
-		if strings.HasSuffix(title, "h0m") {
-			title = strings.TrimSuffix(title, "0m")
-		}
-		return title
+		return s.Title()
 	},
 }
 

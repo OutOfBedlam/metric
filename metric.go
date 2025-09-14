@@ -108,11 +108,9 @@ func HistogramTypePercentiles(u Unit, maxBin int, ps ...float64) Type {
 }
 
 type SeriesInfo struct {
-	Name   string
-	Series string
-	Period time.Duration
-	Type   string
-	Unit   Unit
+	MeasureName string   `json:"measure_name"`
+	MeasureType Type     `json:"measure_type"`
+	SeriesID    SeriesID `json:"series_id"`
 }
 
 func (si *SeriesInfo) H() map[string]any {
@@ -120,10 +118,13 @@ func (si *SeriesInfo) H() map[string]any {
 		return nil
 	}
 	return H{
-		"name":   si.Name,
-		"series": si.Series,
-		"unit":   si.Unit,
-		"type":   si.Type,
+		"name":         si.MeasureName,
+		"series_id":    si.SeriesID.ID(),
+		"series_title": si.SeriesID.Title(),
+		"period":       si.SeriesID.period.String(),
+		"max_count":    si.SeriesID.maxCount,
+		"unit":         si.MeasureType.Unit(),
+		"type":         si.MeasureType.Name(),
 	}
 }
 
@@ -187,10 +188,9 @@ func WithSamplingInterval(interval time.Duration) CollectorOption {
 	}
 }
 
-func WithSeries(name string, period time.Duration, maxCount int) CollectorOption {
+func WithSeries(seriesID ...SeriesID) CollectorOption {
 	return func(c *Collector) {
-		id := regexpInvalidSeriesID.ReplaceAllString(name, "_")
-		c.series = append(c.series, NewSeriesID(id, name, period, maxCount))
+		c.series = append(c.series, seriesID...)
 	}
 }
 
@@ -496,14 +496,15 @@ func (c *Collector) receive(m *Gather) {
 }
 
 type Product struct {
-	Name   string        `json:"name"`
-	Time   time.Time     `json:"ts"`
-	Value  Value         `json:"value,omitempty"`
-	IsNull bool          `json:"isNull,omitempty"`
-	Series string        `json:"series"`
-	Period time.Duration `json:"period"`
-	Type   string        `json:"type"`
-	Unit   Unit          `json:"unit"`
+	Name        string        `json:"name"`
+	Time        time.Time     `json:"ts"`
+	Value       Value         `json:"value,omitempty"`
+	IsNull      bool          `json:"isNull,omitempty"`
+	SeriesID    string        `json:"series_id"`
+	SeriesTitle string        `json:"series_title"`
+	Period      time.Duration `json:"period"`
+	Type        string        `json:"type"`
+	Unit        Unit          `json:"unit"`
 }
 
 func (c *Collector) onProduct(tb TimeBin, meta any) {
@@ -525,15 +526,13 @@ func (c *Collector) makeMultiTimeSeries(measure Measure) MultiTimeSeries {
 		ts.SetListener(c.onProduct)
 		ts.SetStorage(c.storage)
 		ts.SetMeta(SeriesInfo{
-			Name:   measure.Name,
-			Series: ser.Name(),
-			Period: ser.Period(),
-			Type:   measure.Type.String(),
-			Unit:   measure.Type.Unit(),
+			MeasureName: measure.Name,
+			MeasureType: measure.Type,
+			SeriesID:    ser,
 		})
 		if c.storage != nil {
 			if err := ts.Restore(c.storage, measure.Name, ser); err != nil {
-				slog.Error("Failed to restore time series", "measure", measure.Name, "series", ser.Name(), "error", err)
+				slog.Error("Failed to restore time series", "measure", measure.Name, "series", ser.ID(), "error", err)
 			}
 		}
 		mts[i] = ts
@@ -599,21 +598,23 @@ func (c *Collector) Inflight(measureName string) (map[string]Product, error) {
 
 	ret := map[string]Product{}
 	for idx, n := range c.series {
-		seriesName := n.Name()
+		seriesID := n.ID()
 		nfo, ok := mts[idx].Meta().(SeriesInfo)
 		if !ok {
 			return nil, fmt.Errorf("metric %s series %s meta is not MeasurementInfo, but %T",
-				measureName, seriesName, mts[idx].Meta())
+				measureName, seriesID, mts[idx].Meta())
 		}
 		ts, prd := mts[idx].Last()
-		ret[seriesName] = Product{
-			Name:   nfo.Name,
-			Time:   ts,
-			Value:  prd,
-			IsNull: prd == nil,
-			Series: nfo.Series,
-			Type:   nfo.Type,
-			Unit:   nfo.Unit,
+		ret[seriesID] = Product{
+			Name:        nfo.MeasureName,
+			Time:        ts,
+			Value:       prd,
+			IsNull:      prd == nil,
+			SeriesID:    nfo.SeriesID.ID(),
+			SeriesTitle: nfo.SeriesID.Title(),
+			Period:      nfo.SeriesID.Period(),
+			Type:        nfo.MeasureType.Name(),
+			Unit:        nfo.MeasureType.Unit(),
 		}
 	}
 	return ret, nil
@@ -625,18 +626,18 @@ func (c *Collector) syncStorage() {
 	}
 	c.Lock()
 	defer c.Unlock()
-	for _, id := range c.series {
-		mts, ok := c.timeseries[id.Name()]
-		if !ok {
-			continue
-		}
+	for _, mts := range c.timeseries {
 		for _, ts := range mts {
 			tb, meta := ts.LastBin()
 			var prd Product
 			ToProduct(&prd, tb, meta)
-			err := c.storage.Store(id, prd, true)
+			id, err := NewSeriesID(prd.SeriesID, prd.Name, prd.Period, ts.maxCount)
 			if err != nil {
-				slog.Error("Failed to store time series", "name", id.Name(), "error", err)
+				slog.Error("Failed to create series ID", "ID", prd.SeriesID, "error", err)
+				continue
+			}
+			if err := c.storage.Store(id, prd, true); err != nil {
+				slog.Error("Failed to store time series", "ID", id.ID(), "error", err)
 			}
 		}
 	}
