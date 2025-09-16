@@ -242,7 +242,7 @@ func (d *Dashboard) SetTheme(theme string) {
 
 func (d *Dashboard) SetPanelHeight(height string) {
 	// "height":        "300px",     // Fixed height for each panel
-	d.Option.Style[".panel"]["height"] = fmt.Sprintf("%s", height)
+	d.Option.Style[".panel"]["height"] = height
 }
 
 func (d *Dashboard) SetPanelMinWidth(width string) {
@@ -397,6 +397,9 @@ func (d Dashboard) HandleData(w http.ResponseWriter, r *http.Request) {
 			"title": H{
 				"text":    panelOpt.Title,
 				"subtext": panelOpt.SubTitle,
+			},
+			"grid": H{
+				"bottom": 60,
 			},
 			"legend": H{"type": "scroll", "width": "80%", "bottom": 4, "textStyle": H{"fontSize": 11}},
 			"tooltip": H{
