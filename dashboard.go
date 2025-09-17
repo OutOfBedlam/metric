@@ -709,7 +709,7 @@ func (ss Snapshot) timerToSeries(opt Chart) []Series {
 func (ss Snapshot) odometerToSeries(opt Chart) []Series {
 	var series []Series
 	typ, stack := opt.Type.TypeAndStack("bar")
-	allFieldNames := []string{"first", "last", "diff", "non-negative-diff", "abs-diff"}
+	allFieldNames := []string{"first", "last", "diff", "non_negative_diff", "abs_diff"}
 	if opt.fieldNameFilter == nil {
 		// if no field filter, always shows the "diff" field only
 		allFieldNames = []string{"last"}
@@ -732,9 +732,9 @@ func (ss Snapshot) odometerToSeries(opt Chart) []Series {
 				data[i].Value = v.Last
 			case "diff":
 				data[i].Value = v.Diff()
-			case "non-negative-diff":
+			case "non_negative_diff":
 				data[i].Value = v.NonNegativeDiff()
-			case "abs-diff":
+			case "abs_diff":
 				data[i].Value = v.AbsDiff()
 			}
 		}
