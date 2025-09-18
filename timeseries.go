@@ -13,6 +13,8 @@ type TimeBin struct {
 	Time   time.Time `json:"ts"`
 	Value  Value     `json:"value,omitempty"`
 	IsNull bool      `json:"isNull,omitempty"`
+
+	DerivedValues map[DeriveName]Value `json:"derivedValues,omitempty"`
 }
 
 func (tv TimeBin) String() string {
@@ -113,16 +115,47 @@ type TimeSeries struct {
 	meta     any // Optional metadata for the time series
 	lsnr     func(TimeBin, any)
 	storage  Storage
+	derived  map[DeriveName]DeriveType
+}
+
+type DeriveName string
+type DeriveType interface {
+	Derive() Value
+}
+
+type MovingAverage struct {
+	WindowSize int
+}
+
+func (ma MovingAverage) Derive() Value {
+	return nil
 }
 
 // If aggregator is nil, it will replace the last point with the new one.
 // Otherwise, it will aggregate the new point with the last one when it falls within the same interval.
-func NewTimeSeries(interval time.Duration, maxCount int, prod Producer) *TimeSeries {
+func NewTimeSeries(interval time.Duration, maxCount int, prod Producer, opts ...TimeSeriesOption) *TimeSeries {
 	return &TimeSeries{
 		producer: prod,
 		data:     make([]TimeBin, 0, maxCount),
 		interval: interval,
 		maxCount: maxCount,
+	}
+}
+
+type TimeSeriesOption func(*TimeSeries)
+
+func WithMovingAverage(name string, windowSize int) TimeSeriesOption {
+	return func(ts *TimeSeries) {
+		if ts.derived == nil {
+			ts.derived = make(map[DeriveName]DeriveType)
+		}
+		if windowSize >= ts.maxCount {
+			windowSize = ts.maxCount
+		}
+		ma := MovingAverage{
+			WindowSize: windowSize,
+		}
+		ts.derived[DeriveName(name)] = ma
 	}
 }
 
