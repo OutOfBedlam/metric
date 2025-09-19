@@ -32,6 +32,11 @@ type Value interface {
 	String() string
 }
 
+type DerivingValue interface {
+	Value
+	SetDerivedValue(name string, value Value)
+}
+
 // Type is the type of the Value.
 type Type struct {
 	p func() Producer

@@ -272,7 +272,9 @@ func TestTimeSeriesCounter(t *testing.T) {
 }
 
 func TestTimeSeriesCounterWithSlidingWindow(t *testing.T) {
-	ts := NewTimeSeries(1*time.Second, 10, NewCounter())
+	ts := NewTimeSeries(1*time.Second, 10, NewCounter(),
+		WithMovingAverage(3),
+		WithMovingAverage(5))
 
 	now := time.Date(2025, 07, 21, 17, 31, 12, 0, time.FixedZone("Asia/Seoul", 9*60*60))
 	nowFunc = func() time.Time {
@@ -298,18 +300,46 @@ func TestTimeSeriesCounterWithSlidingWindow(t *testing.T) {
 		time.Date(2025, 07, 21, 17, 31, 21, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
 		time.Date(2025, 07, 21, 17, 31, 22, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
 	}, times)
-	require.Equal(t, []Value{
-		&CounterValue{Samples: 10, Value: 55},
-		&CounterValue{Samples: 10, Value: 155},
-		&CounterValue{Samples: 10, Value: 255},
-		&CounterValue{Samples: 10, Value: 355},
-		&CounterValue{Samples: 10, Value: 455},
-		&CounterValue{Samples: 10, Value: 555},
-		&CounterValue{Samples: 10, Value: 655},
-		&CounterValue{Samples: 10, Value: 755},
-		&CounterValue{Samples: 10, Value: 855},
-		&CounterValue{Samples: 10, Value: 955},
-	}, values)
+	require.Equal(t, &CounterValue{Samples: 10, Value: 55, DerivedValues: map[string]Value{
+		"ma3": &CounterValue{Samples: 10, Value: 55},
+		"ma5": &CounterValue{Samples: 10, Value: 55},
+	}}, values[0])
+	require.Equal(t, &CounterValue{Samples: 10, Value: 155, DerivedValues: map[string]Value{
+		"ma3": &CounterValue{Samples: 20, Value: 105},
+		"ma5": &CounterValue{Samples: 20, Value: 105},
+	}}, values[1])
+	require.Equal(t, &CounterValue{Samples: 10, Value: 255, DerivedValues: map[string]Value{
+		"ma3": &CounterValue{Samples: 30, Value: 155},
+		"ma5": &CounterValue{Samples: 30, Value: 155},
+	}}, values[2])
+	require.Equal(t, &CounterValue{Samples: 10, Value: 355, DerivedValues: map[string]Value{
+		"ma3": &CounterValue{Samples: 30, Value: 255},
+		"ma5": &CounterValue{Samples: 40, Value: 205},
+	}}, values[3])
+	require.Equal(t, &CounterValue{Samples: 10, Value: 455, DerivedValues: map[string]Value{
+		"ma3": &CounterValue{Samples: 30, Value: 355},
+		"ma5": &CounterValue{Samples: 50, Value: 255},
+	}}, values[4])
+	require.Equal(t, &CounterValue{Samples: 10, Value: 555, DerivedValues: map[string]Value{
+		"ma3": &CounterValue{Samples: 30, Value: 455},
+		"ma5": &CounterValue{Samples: 50, Value: 355},
+	}}, values[5])
+	require.Equal(t, &CounterValue{Samples: 10, Value: 655, DerivedValues: map[string]Value{
+		"ma3": &CounterValue{Samples: 30, Value: 555},
+		"ma5": &CounterValue{Samples: 50, Value: 455},
+	}}, values[6])
+	require.Equal(t, &CounterValue{Samples: 10, Value: 755, DerivedValues: map[string]Value{
+		"ma3": &CounterValue{Samples: 30, Value: 655},
+		"ma5": &CounterValue{Samples: 50, Value: 555},
+	}}, values[7])
+	require.Equal(t, &CounterValue{Samples: 10, Value: 855, DerivedValues: map[string]Value{
+		"ma3": &CounterValue{Samples: 30, Value: 755},
+		"ma5": &CounterValue{Samples: 50, Value: 655},
+	}}, values[8])
+	require.Equal(t, &CounterValue{Samples: 10, Value: 955, DerivedValues: map[string]Value{
+		"ma3": &CounterValue{Samples: 30, Value: 855},
+		"ma5": &CounterValue{Samples: 50, Value: 755},
+	}}, values[9])
 }
 
 func TestTimeSeriesGauge(t *testing.T) {

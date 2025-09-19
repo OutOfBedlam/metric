@@ -14,7 +14,7 @@ type TimeBin struct {
 	Value  Value     `json:"value,omitempty"`
 	IsNull bool      `json:"isNull,omitempty"`
 
-	DerivedValues map[DeriveName]Value `json:"derivedValues,omitempty"`
+	DerivedValues map[string]Value `json:"derivedValues,omitempty"`
 }
 
 func (tv TimeBin) String() string {
@@ -25,11 +25,12 @@ func (tv TimeBin) String() string {
 }
 
 func (tv TimeBin) MarshalJSON() ([]byte, error) {
+	ts := tv.Time.UnixNano()
 	if ((any)(tv.Value)) == nil {
-		return []byte(fmt.Sprintf(`{"ts":%d,"isNull":%t}`, tv.Time.UnixNano(), tv.IsNull)), nil
+		return []byte(fmt.Sprintf(`{"ts":%d,"isNull":%t}`, ts, tv.IsNull)), nil
 	} else {
 		typ := fmt.Sprintf("%T", tv.Value)
-		return []byte(fmt.Sprintf(`{"ts":%d,"type":%q,"value":%s}`, tv.Time.UnixNano(), typ, tv.Value.String())), nil
+		return []byte(fmt.Sprintf(`{"ts":%d,"type":%q,"value":%s}`, ts, typ, tv.Value.String())), nil
 	}
 }
 
@@ -115,47 +116,37 @@ type TimeSeries struct {
 	meta     any // Optional metadata for the time series
 	lsnr     func(TimeBin, any)
 	storage  Storage
-	derived  map[DeriveName]DeriveType
-}
-
-type DeriveName string
-type DeriveType interface {
-	Derive() Value
-}
-
-type MovingAverage struct {
-	WindowSize int
-}
-
-func (ma MovingAverage) Derive() Value {
-	return nil
+	derivers []Deriver
 }
 
 // If aggregator is nil, it will replace the last point with the new one.
 // Otherwise, it will aggregate the new point with the last one when it falls within the same interval.
 func NewTimeSeries(interval time.Duration, maxCount int, prod Producer, opts ...TimeSeriesOption) *TimeSeries {
-	return &TimeSeries{
+	ret := &TimeSeries{
 		producer: prod,
 		data:     make([]TimeBin, 0, maxCount),
 		interval: interval,
 		maxCount: maxCount,
 	}
+	for _, opt := range opts {
+		opt(ret)
+	}
+	return ret
 }
 
 type TimeSeriesOption func(*TimeSeries)
 
-func WithMovingAverage(name string, windowSize int) TimeSeriesOption {
+// WithMovingAverage adds a moving average deriver to the time series.
+// The moving average will be calculated over the specified window size.
+// If the window size is greater than the maxCount of the time series,
+// it will be set to maxCount.
+func WithMovingAverage(windowSize int) TimeSeriesOption {
 	return func(ts *TimeSeries) {
-		if ts.derived == nil {
-			ts.derived = make(map[DeriveName]DeriveType)
-		}
 		if windowSize >= ts.maxCount {
 			windowSize = ts.maxCount
 		}
-		ma := MovingAverage{
-			WindowSize: windowSize,
-		}
-		ts.derived[DeriveName(name)] = ma
+		ma := MovingAverage{windowSize: windowSize}
+		ts.derivers = append(ts.derivers, ma)
 	}
 }
 
@@ -207,6 +198,24 @@ func (ts *TimeSeries) MaxCount() int {
 	return ts.maxCount
 }
 
+func (ts *TimeSeries) runDerivers(currentValue Value, isLastValue bool) {
+	driving, ok := currentValue.(DerivingValue)
+	if !ok {
+		return
+	}
+	// Derive additional values
+	for _, d := range ts.derivers {
+		_, values := ts.lastN(d.WindowSize() + 1)
+		if isLastValue {
+			values = values[1:]
+		} else {
+			values = values[0 : len(values)-1] // Exclude the last point which is the last one which is empty.
+		}
+		dv := d.Derive(values)
+		driving.SetDerivedValue(d.ID(), dv)
+	}
+}
+
 func (ts *TimeSeries) LastBin() (TimeBin, any) {
 	tm, val := ts.Last()
 	tb := TimeBin{Time: tm, Value: val, IsNull: val == nil}
@@ -228,7 +237,12 @@ func (ts *TimeSeries) All() ([]time.Time, []Value) {
 func (ts *TimeSeries) LastN(n int) ([]time.Time, []Value) {
 	ts.Lock()
 	defer ts.Unlock()
+	times, values := ts.lastN(n)
+	ts.runDerivers(values[len(values)-1], true)
+	return times, values
+}
 
+func (ts *TimeSeries) lastN(n int) ([]time.Time, []Value) {
 	lt := ts.roundTime(ts.lastTime)
 	lv := ts.producer.Produce(false)
 	if n == 1 {
@@ -320,9 +334,13 @@ func (ts *TimeSeries) add(tm time.Time, val float64) {
 
 	p := ts.producer.Produce(true)
 	tb := TimeBin{Time: ts.roundTime(ts.lastTime), Value: p, IsNull: p == nil}
+
+	// Notify listener
 	if ts.lsnr != nil {
 		ts.lsnr(tb, ts.meta)
 	}
+
+	// Store to storage
 	if ts.storage != nil {
 		var prd Product
 		if ok := ToProduct(&prd, tb, ts.meta); ok {
@@ -341,6 +359,9 @@ func (ts *TimeSeries) add(tm time.Time, val float64) {
 		ts.producer.Add(val)
 	}
 	roll--
+
+	// Derive additional values
+	ts.runDerivers(tb.Value, false)
 
 	// Reset if the gap is too large
 	if roll >= ts.maxCount-1 {
