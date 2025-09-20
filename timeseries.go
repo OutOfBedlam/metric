@@ -116,7 +116,7 @@ type TimeSeries struct {
 	meta     any // Optional metadata for the time series
 	lsnr     func(TimeBin, any)
 	storage  Storage
-	derivers []Deriver
+	derivers map[string]Deriver
 }
 
 // If aggregator is nil, it will replace the last point with the new one.
@@ -136,17 +136,12 @@ func NewTimeSeries(interval time.Duration, maxCount int, prod Producer, opts ...
 
 type TimeSeriesOption func(*TimeSeries)
 
-// WithMovingAverage adds a moving average deriver to the time series.
-// The moving average will be calculated over the specified window size.
-// If the window size is greater than the maxCount of the time series,
-// it will be set to maxCount.
-func WithMovingAverage(windowSize int) TimeSeriesOption {
+func WithDeriver(id string, d Deriver) TimeSeriesOption {
 	return func(ts *TimeSeries) {
-		if windowSize >= ts.maxCount {
-			windowSize = ts.maxCount
+		if ts.derivers == nil {
+			ts.derivers = make(map[string]Deriver)
 		}
-		ma := MovingAverage{windowSize: windowSize}
-		ts.derivers = append(ts.derivers, ma)
+		ts.derivers[id] = d
 	}
 }
 
@@ -198,21 +193,26 @@ func (ts *TimeSeries) MaxCount() int {
 	return ts.maxCount
 }
 
-func (ts *TimeSeries) runDerivers(currentValue Value, isLastValue bool) {
+func (ts *TimeSeries) runDerivers(currentValue Value, preliminary bool) {
 	driving, ok := currentValue.(DerivingValue)
 	if !ok {
 		return
 	}
 	// Derive additional values
-	for _, d := range ts.derivers {
-		_, values := ts.lastN(d.WindowSize() + 1)
-		if isLastValue {
-			values = values[1:]
+	for id, d := range ts.derivers {
+		var values []Value
+		if ws := d.WindowSize(); ws > 0 {
+			_, values = ts.lastN(d.WindowSize() + 1)
+			if preliminary {
+				values = values[1:]
+			} else {
+				values = values[0 : len(values)-1] // Exclude the last point which is the last one which is empty.
+			}
 		} else {
-			values = values[0 : len(values)-1] // Exclude the last point which is the last one which is empty.
+			_, values = ts.lastN(1)
 		}
 		dv := d.Derive(values)
-		driving.SetDerivedValue(d.ID(), dv)
+		driving.SetDerivedValue(id, dv)
 	}
 }
 

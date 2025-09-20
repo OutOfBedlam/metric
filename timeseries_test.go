@@ -273,8 +273,9 @@ func TestTimeSeriesCounter(t *testing.T) {
 
 func TestTimeSeriesCounterWithSlidingWindow(t *testing.T) {
 	ts := NewTimeSeries(1*time.Second, 10, NewCounter(),
-		WithMovingAverage(3),
-		WithMovingAverage(5))
+		WithDeriver("ma3", NewMovingAverage(3)),
+		WithDeriver("ma5", NewMovingAverage(5)),
+	)
 
 	now := time.Date(2025, 07, 21, 17, 31, 12, 0, time.FixedZone("Asia/Seoul", 9*60*60))
 	nowFunc = func() time.Time {

@@ -1,11 +1,12 @@
 package metric
 
-import "fmt"
-
 type Deriver interface {
-	ID() string
 	WindowSize() int
 	Derive(values []Value) Value
+}
+
+func NewMovingAverage(windowSize int) Deriver {
+	return &MovingAverage{windowSize: windowSize}
 }
 
 var _ Deriver = MovingAverage{}
@@ -15,10 +16,6 @@ type MovingAverage struct {
 	// Must be less than or equal to the maxCount of the TimeSeries.
 	// If greater than maxCount, it will be set to maxCount.
 	windowSize int
-}
-
-func (ma MovingAverage) ID() string {
-	return fmt.Sprintf("ma%d", ma.windowSize)
 }
 
 func (ma MovingAverage) WindowSize() int {
