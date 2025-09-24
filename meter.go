@@ -103,9 +103,18 @@ type MeterValue struct {
 	Last    float64 `json:"last"`
 	Min     float64 `json:"min"`
 	Max     float64 `json:"max"`
+	// Optional derived values, such as moving averages
+	DerivedValues map[string]Value `json:"derived,omitempty"`
 }
 
 func (mp *MeterValue) String() string {
 	b, _ := json.Marshal(mp)
 	return string(b)
+}
+
+func (cp *MeterValue) SetDerivedValue(name string, value Value) {
+	if cp.DerivedValues == nil {
+		cp.DerivedValues = make(map[string]Value)
+	}
+	cp.DerivedValues[name] = value
 }

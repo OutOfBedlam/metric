@@ -28,6 +28,8 @@ func (ma MovingAverage) Derive(values []Value) Value {
 		return ma.DeriveCounter(values)
 	case *GaugeValue:
 		return ma.DeriveGauge(values)
+	case *MeterValue:
+		return ma.DeriveMeter(values)
 	default:
 		return values[len(values)-1]
 	}
@@ -85,6 +87,47 @@ func (ma MovingAverage) DeriveGauge(values []Value) Value {
 	}
 	if lastValueCount > 0 {
 		ret.Value = lastValueSum / float64(lastValueCount)
+	}
+	return ret
+}
+
+func (ma MovingAverage) DeriveMeter(values []Value) Value {
+	var sum float64
+	var first float64
+	var last float64
+	var min float64
+	var max float64
+	var samples int64
+	var validValueCount int
+
+	for _, value := range values {
+		if value == nil {
+			continue
+		}
+		val, ok := value.(*MeterValue)
+		if !ok {
+			continue
+		}
+		if val.Samples == 0 {
+			continue
+		}
+		validValueCount++
+		samples += val.Samples
+		sum += val.Sum
+		first += val.First
+		last += val.Last
+		min += val.Min
+		max += val.Max
+	}
+	ret := &MeterValue{
+		Samples: samples,
+		Sum:     sum,
+	}
+	if validValueCount > 0 {
+		ret.First = first / float64(validValueCount)
+		ret.Last = last / float64(validValueCount)
+		ret.Min = min / float64(validValueCount)
+		ret.Max = max / float64(validValueCount)
 	}
 	return ret
 }

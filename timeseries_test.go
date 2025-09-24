@@ -495,6 +495,78 @@ func TestTimeSeriesMeter(t *testing.T) {
 	}, values)
 }
 
+func TestTimeSeriesMeterWithSlidingWindow(t *testing.T) {
+	ts := NewTimeSeries(time.Second, 10, NewMeter(),
+		WithDeriver("ma3", NewMovingAverage(3)),
+		WithDeriver("ma5", NewMovingAverage(5)),
+	)
+
+	now := time.Date(2025, 07, 21, 17, 31, 12, 0, time.FixedZone("Asia/Seoul", 9*60*60))
+	nowFunc = func() time.Time {
+		ret := now
+		now = now.Add(time.Millisecond * 100)
+		return ret
+	}
+
+	for i := 1; i <= 100; i++ {
+		ts.Add(float64(i))
+	}
+
+	times, values := ts.All()
+	require.Equal(t, []time.Time{
+		time.Date(2025, 07, 21, 17, 31, 13, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 14, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 15, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 16, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 17, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 18, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 19, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 20, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 21, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 22, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+	}, times)
+	require.Equal(t, &MeterValue{Min: 1, Max: 10, First: 1, Last: 10, Sum: 55, Samples: 10, DerivedValues: map[string]Value{
+		"ma3": &MeterValue{Min: 1, Max: 10, First: 1, Last: 10, Sum: 55, Samples: 10},
+		"ma5": &MeterValue{Min: 1, Max: 10, First: 1, Last: 10, Sum: 55, Samples: 10},
+	}}, values[0])
+	require.Equal(t, &MeterValue{Min: 11, Max: 20, First: 11, Last: 20, Sum: 155, Samples: 10, DerivedValues: map[string]Value{
+		"ma3": &MeterValue{Min: 6, Max: 15, First: 6, Last: 15, Sum: 210, Samples: 20},
+		"ma5": &MeterValue{Min: 6, Max: 15, First: 6, Last: 15, Sum: 210, Samples: 20},
+	}}, values[1])
+	require.Equal(t, &MeterValue{Min: 21, Max: 30, First: 21, Last: 30, Sum: 255, Samples: 10, DerivedValues: map[string]Value{
+		"ma3": &MeterValue{Min: 11, Max: 20, First: 11, Last: 20, Sum: 465, Samples: 30},
+		"ma5": &MeterValue{Min: 11, Max: 20, First: 11, Last: 20, Sum: 465, Samples: 30},
+	}}, values[2])
+	require.Equal(t, &MeterValue{Min: 31, Max: 40, First: 31, Last: 40, Sum: 355, Samples: 10, DerivedValues: map[string]Value{
+		"ma3": &MeterValue{Min: 21, Max: 30, First: 21, Last: 30, Sum: 765, Samples: 30},
+		"ma5": &MeterValue{Min: 16, Max: 25, First: 16, Last: 25, Sum: 820, Samples: 40},
+	}}, values[3])
+	require.Equal(t, &MeterValue{Min: 41, Max: 50, First: 41, Last: 50, Sum: 455, Samples: 10, DerivedValues: map[string]Value{
+		"ma3": &MeterValue{Min: 31, Max: 40, First: 31, Last: 40, Sum: 1065, Samples: 30},
+		"ma5": &MeterValue{Min: 21, Max: 30, First: 21, Last: 30, Sum: 1275, Samples: 50},
+	}}, values[4])
+	require.Equal(t, &MeterValue{Min: 51, Max: 60, First: 51, Last: 60, Sum: 555, Samples: 10, DerivedValues: map[string]Value{
+		"ma3": &MeterValue{Min: 41, Max: 50, First: 41, Last: 50, Sum: 1365, Samples: 30},
+		"ma5": &MeterValue{Min: 31, Max: 40, First: 31, Last: 40, Sum: 1775, Samples: 50},
+	}}, values[5])
+	require.Equal(t, &MeterValue{Min: 61, Max: 70, First: 61, Last: 70, Sum: 655, Samples: 10, DerivedValues: map[string]Value{
+		"ma3": &MeterValue{Min: 51, Max: 60, First: 51, Last: 60, Sum: 1665, Samples: 30},
+		"ma5": &MeterValue{Min: 41, Max: 50, First: 41, Last: 50, Sum: 2275, Samples: 50},
+	}}, values[6])
+	require.Equal(t, &MeterValue{Min: 71, Max: 80, First: 71, Last: 80, Sum: 755, Samples: 10, DerivedValues: map[string]Value{
+		"ma3": &MeterValue{Min: 61, Max: 70, First: 61, Last: 70, Sum: 1965, Samples: 30},
+		"ma5": &MeterValue{Min: 51, Max: 60, First: 51, Last: 60, Sum: 2775, Samples: 50},
+	}}, values[7])
+	require.Equal(t, &MeterValue{Min: 81, Max: 90, First: 81, Last: 90, Sum: 855, Samples: 10, DerivedValues: map[string]Value{
+		"ma3": &MeterValue{Min: 71, Max: 80, First: 71, Last: 80, Sum: 2265, Samples: 30},
+		"ma5": &MeterValue{Min: 61, Max: 70, First: 61, Last: 70, Sum: 3275, Samples: 50},
+	}}, values[8])
+	require.Equal(t, &MeterValue{Min: 91, Max: 100, First: 91, Last: 100, Sum: 955, Samples: 10, DerivedValues: map[string]Value{
+		"ma3": &MeterValue{Min: 81, Max: 90, First: 81, Last: 90, Sum: 2565, Samples: 30},
+		"ma5": &MeterValue{Min: 71, Max: 80, First: 71, Last: 80, Sum: 3775, Samples: 50},
+	}}, values[9])
+}
+
 func TestTimeSeriesHistogram(t *testing.T) {
 	ts := NewTimeSeries(time.Second, 10, NewHistogram(100, 0.5, 0.75, 0.99))
 
