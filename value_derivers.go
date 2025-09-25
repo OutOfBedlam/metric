@@ -1,21 +1,29 @@
 package metric
 
+import "time"
+
 type Deriver interface {
+	ID() string
 	WindowSize() int
 	Derive(values []Value) Value
 }
 
-func NewMovingAverage(windowSize int) Deriver {
-	return &MovingAverage{windowSize: windowSize}
+func NewMovingAverage(id string, windowSize int) Deriver {
+	return &MovingAverage{id: id, windowSize: windowSize}
 }
 
 var _ Deriver = MovingAverage{}
 
 type MovingAverage struct {
+	id string
 	// Number of points to include in the moving average calculation.
 	// Must be less than or equal to the maxCount of the TimeSeries.
 	// If greater than maxCount, it will be set to maxCount.
 	windowSize int
+}
+
+func (ma MovingAverage) ID() string {
+	return ma.id
 }
 
 func (ma MovingAverage) WindowSize() int {
@@ -30,6 +38,8 @@ func (ma MovingAverage) Derive(values []Value) Value {
 		return ma.DeriveGauge(values)
 	case *MeterValue:
 		return ma.DeriveMeter(values)
+	case *TimerValue:
+		return ma.DeriveTimer(values)
 	default:
 		return values[len(values)-1]
 	}
@@ -128,6 +138,39 @@ func (ma MovingAverage) DeriveMeter(values []Value) Value {
 		ret.Last = last / float64(validValueCount)
 		ret.Min = min / float64(validValueCount)
 		ret.Max = max / float64(validValueCount)
+	}
+	return ret
+}
+
+func (ma MovingAverage) DeriveTimer(values []Value) Value {
+	var sum time.Duration
+	var min time.Duration
+	var max time.Duration
+	var validValueCount int
+	var samples int64
+	for _, value := range values {
+		if value == nil {
+			continue
+		}
+		val, ok := value.(*TimerValue)
+		if !ok {
+			continue
+		}
+		if val.Samples > 0 {
+			samples += val.Samples
+			sum += val.SumDuration
+			min = min + val.MinDuration
+			max = max + val.MaxDuration
+			validValueCount++
+		}
+	}
+	ret := &TimerValue{
+		Samples:     samples,
+		SumDuration: sum,
+	}
+	if validValueCount > 0 {
+		ret.MinDuration = min / time.Duration(validValueCount)
+		ret.MaxDuration = max / time.Duration(validValueCount)
 	}
 	return ret
 }

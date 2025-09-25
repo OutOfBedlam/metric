@@ -88,8 +88,8 @@ func (h *Histogram) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (h *Histogram) String() string {
-	return h.Produce(false).String()
+func (fs *Histogram) Derivers() []Deriver {
+	return nil
 }
 
 func (h *Histogram) Add(value float64) {
@@ -194,6 +194,10 @@ func (h *Histogram) Produce(reset bool) Value {
 		h.samples = 0
 	}
 	return ret
+}
+
+func (h *Histogram) String() string {
+	return h.Produce(false).String()
 }
 
 type HistogramValue struct {

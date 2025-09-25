@@ -272,9 +272,11 @@ func TestTimeSeriesCounter(t *testing.T) {
 }
 
 func TestTimeSeriesCounterWithSlidingWindow(t *testing.T) {
-	ts := NewTimeSeries(1*time.Second, 10, NewCounter(),
-		WithDeriver("ma3", NewMovingAverage(3)),
-		WithDeriver("ma5", NewMovingAverage(5)),
+	ts := NewTimeSeries(1*time.Second, 10,
+		NewCounter().WithDerivers(
+			NewMovingAverage("ma3", 3),
+			NewMovingAverage("ma5", 5),
+		),
 	)
 
 	now := time.Date(2025, 07, 21, 17, 31, 12, 0, time.FixedZone("Asia/Seoul", 9*60*60))
@@ -384,9 +386,11 @@ func TestTimeSeriesGauge(t *testing.T) {
 }
 
 func TestTimeSeriesGaugeWithSlidingWindow(t *testing.T) {
-	ts := NewTimeSeries(time.Second, 10, NewGauge(),
-		WithDeriver("ma3", NewMovingAverage(3)),
-		WithDeriver("ma5", NewMovingAverage(5)),
+	ts := NewTimeSeries(time.Second, 10,
+		NewGauge().WithDerivers(
+			NewMovingAverage("ma3", 3),
+			NewMovingAverage("ma5", 5),
+		),
 	)
 
 	now := time.Date(2025, 07, 21, 17, 31, 12, 0, time.FixedZone("Asia/Seoul", 9*60*60))
@@ -496,9 +500,11 @@ func TestTimeSeriesMeter(t *testing.T) {
 }
 
 func TestTimeSeriesMeterWithSlidingWindow(t *testing.T) {
-	ts := NewTimeSeries(time.Second, 10, NewMeter(),
-		WithDeriver("ma3", NewMovingAverage(3)),
-		WithDeriver("ma5", NewMovingAverage(5)),
+	ts := NewTimeSeries(time.Second, 10,
+		NewMeter().WithDerivers(
+			NewMovingAverage("ma3", 3),
+			NewMovingAverage("ma5", 5),
+		),
 	)
 
 	now := time.Date(2025, 07, 21, 17, 31, 12, 0, time.FixedZone("Asia/Seoul", 9*60*60))

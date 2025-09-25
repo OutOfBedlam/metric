@@ -25,6 +25,7 @@ type Timer struct {
 	sumDuration time.Duration
 	minDuration time.Duration
 	maxDuration time.Duration
+	derivers    []Deriver
 }
 
 var _ Producer = (*Timer)(nil)
@@ -44,6 +45,15 @@ func (t *Timer) UnmarshalJSON(data []byte) error {
 	t.minDuration = tv.MinDuration
 	t.maxDuration = tv.MaxDuration
 	return nil
+}
+
+func (t *Timer) WithDeriver(deriver Deriver) *Timer {
+	t.derivers = append(t.derivers, deriver)
+	return t
+}
+
+func (t *Timer) Derivers() []Deriver {
+	return t.derivers
 }
 
 func (t *Timer) String() string {
@@ -78,6 +88,19 @@ func (t *Timer) Produce(reset bool) Value {
 	return ret
 }
 
+type TimerMarker struct {
+	t     *Timer
+	start time.Time
+}
+
+func (w *TimerMarker) Mark() {
+	w.t.Mark(time.Since(w.start))
+}
+
+func (t *Timer) New() *TimerMarker {
+	return &TimerMarker{t: t, start: nowFunc()}
+}
+
 func (t *Timer) Add(v float64) {
 	t.Mark(time.Duration(v))
 }
@@ -104,9 +127,18 @@ type TimerValue struct {
 	SumDuration time.Duration `json:"sum"`
 	MinDuration time.Duration `json:"min"`
 	MaxDuration time.Duration `json:"max"`
+	// Optional derived values, such as moving averages
+	DerivedValues map[string]Value `json:"derived,omitempty"`
 }
 
 func (tp TimerValue) String() string {
 	b, _ := json.Marshal(tp)
 	return string(b)
+}
+
+func (cp *TimerValue) SetDerivedValue(name string, value Value) {
+	if cp.DerivedValues == nil {
+		cp.DerivedValues = make(map[string]Value)
+	}
+	cp.DerivedValues[name] = value
 }
