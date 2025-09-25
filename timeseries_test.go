@@ -573,6 +573,47 @@ func TestTimeSeriesMeterWithSlidingWindow(t *testing.T) {
 	}}, values[9])
 }
 
+func TestTimeSeriesTimer(t *testing.T) {
+	ts := NewTimeSeries(time.Second, 10, NewTimer())
+
+	now := time.Date(2025, 07, 21, 17, 31, 12, 0, time.FixedZone("Asia/Seoul", 9*60*60))
+	nowFunc = func() time.Time {
+		ret := now
+		now = now.Add(time.Millisecond * 100)
+		return ret
+	}
+
+	for i := 1; i <= 100; i++ {
+		ts.Add(float64(time.Duration(i) * time.Second))
+	}
+
+	times, values := ts.All()
+	require.Equal(t, []time.Time{
+		time.Date(2025, 07, 21, 17, 31, 13, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 14, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 15, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 16, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 17, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 18, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 19, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 20, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 21, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+		time.Date(2025, 07, 21, 17, 31, 22, 0, time.FixedZone("Asia/Seoul", 9*60*60)),
+	}, times)
+	require.Equal(t, []Value{
+		&TimerValue{Min: time.Duration(1) * time.Second, Max: time.Duration(10) * time.Second, Sum: time.Duration(55) * time.Second, Samples: 10},
+		&TimerValue{Min: time.Duration(11) * time.Second, Max: time.Duration(20) * time.Second, Sum: time.Duration(155) * time.Second, Samples: 10},
+		&TimerValue{Min: time.Duration(21) * time.Second, Max: time.Duration(30) * time.Second, Sum: time.Duration(255) * time.Second, Samples: 10},
+		&TimerValue{Min: time.Duration(31) * time.Second, Max: time.Duration(40) * time.Second, Sum: time.Duration(355) * time.Second, Samples: 10},
+		&TimerValue{Min: time.Duration(41) * time.Second, Max: time.Duration(50) * time.Second, Sum: time.Duration(455) * time.Second, Samples: 10},
+		&TimerValue{Min: time.Duration(51) * time.Second, Max: time.Duration(60) * time.Second, Sum: time.Duration(555) * time.Second, Samples: 10},
+		&TimerValue{Min: time.Duration(61) * time.Second, Max: time.Duration(70) * time.Second, Sum: time.Duration(655) * time.Second, Samples: 10},
+		&TimerValue{Min: time.Duration(71) * time.Second, Max: time.Duration(80) * time.Second, Sum: time.Duration(755) * time.Second, Samples: 10},
+		&TimerValue{Min: time.Duration(81) * time.Second, Max: time.Duration(90) * time.Second, Sum: time.Duration(855) * time.Second, Samples: 10},
+		&TimerValue{Min: time.Duration(91) * time.Second, Max: time.Duration(100) * time.Second, Sum: time.Duration(955) * time.Second, Samples: 10},
+	}, values)
+}
+
 func TestTimeSeriesHistogram(t *testing.T) {
 	ts := NewTimeSeries(time.Second, 10, NewHistogram(100, 0.5, 0.75, 0.99))
 

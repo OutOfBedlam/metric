@@ -13,9 +13,9 @@ func NewTimer() *Timer {
 func NewTimerWithValue(v *TimerValue) *Timer {
 	return &Timer{
 		samples:     v.Samples,
-		sumDuration: v.SumDuration,
-		minDuration: v.MinDuration,
-		maxDuration: v.MaxDuration,
+		sumDuration: v.Sum,
+		minDuration: v.Min,
+		maxDuration: v.Max,
 	}
 }
 
@@ -41,9 +41,9 @@ func (t *Timer) UnmarshalJSON(data []byte) error {
 	}
 
 	t.samples = tv.Samples
-	t.sumDuration = tv.SumDuration
-	t.minDuration = tv.MinDuration
-	t.maxDuration = tv.MaxDuration
+	t.sumDuration = tv.Sum
+	t.minDuration = tv.Min
+	t.maxDuration = tv.Max
 	return nil
 }
 
@@ -74,10 +74,10 @@ func (t *Timer) Produce(reset bool) Value {
 	t.Lock()
 	defer t.Unlock()
 	ret := &TimerValue{
-		Samples:     t.samples,
-		SumDuration: t.sumDuration,
-		MinDuration: t.minDuration,
-		MaxDuration: t.maxDuration,
+		Samples: t.samples,
+		Sum:     t.sumDuration,
+		Min:     t.minDuration,
+		Max:     t.maxDuration,
 	}
 	if reset {
 		t.samples = 0
@@ -93,11 +93,13 @@ type TimerMarker struct {
 	start time.Time
 }
 
+var _ Marker = (*TimerMarker)(nil)
+
 func (w *TimerMarker) Mark() {
 	w.t.Mark(time.Since(w.start))
 }
 
-func (t *Timer) New() *TimerMarker {
+func (t *Timer) New() Marker {
 	return &TimerMarker{t: t, start: nowFunc()}
 }
 
@@ -123,10 +125,10 @@ func (t *Timer) Mark(d time.Duration) {
 }
 
 type TimerValue struct {
-	Samples     int64         `json:"samples"`
-	SumDuration time.Duration `json:"sum"`
-	MinDuration time.Duration `json:"min"`
-	MaxDuration time.Duration `json:"max"`
+	Samples int64         `json:"samples"`
+	Sum     time.Duration `json:"sum"`
+	Min     time.Duration `json:"min"`
+	Max     time.Duration `json:"max"`
 	// Optional derived values, such as moving averages
 	DerivedValues map[string]Value `json:"derived,omitempty"`
 }

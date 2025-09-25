@@ -158,19 +158,19 @@ func (ma MovingAverage) DeriveTimer(values []Value) Value {
 		}
 		if val.Samples > 0 {
 			samples += val.Samples
-			sum += val.SumDuration
-			min = min + val.MinDuration
-			max = max + val.MaxDuration
+			sum += val.Sum
+			min = min + val.Min
+			max = max + val.Max
 			validValueCount++
 		}
 	}
 	ret := &TimerValue{
-		Samples:     samples,
-		SumDuration: sum,
+		Samples: samples,
+		Sum:     sum,
 	}
 	if validValueCount > 0 {
-		ret.MinDuration = min / time.Duration(validValueCount)
-		ret.MaxDuration = max / time.Duration(validValueCount)
+		ret.Min = min / time.Duration(validValueCount)
+		ret.Max = max / time.Duration(validValueCount)
 	}
 	return ret
 }

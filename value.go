@@ -39,6 +39,10 @@ type DerivingValue interface {
 	SetDerivedValue(name string, value Value)
 }
 
+type Marker interface {
+	Mark()
+}
+
 // Type is the type of the Value.
 type Type struct {
 	p func() Producer
