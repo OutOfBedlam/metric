@@ -573,8 +573,7 @@ func (c *Collector) syncStorage() {
 	for _, mts := range c.timeseries {
 		for _, ts := range mts {
 			tb, meta := ts.LastBin()
-			var prd Product
-			ToProduct(&prd, tb, meta)
+			var prd Product = ToProduct(tb, meta)
 			id, err := NewSeriesID(prd.SeriesID, prd.Name, prd.Period, ts.maxCount)
 			if err != nil {
 				slog.Error("Failed to create series ID", "ID", prd.SeriesID, "error", err)
