@@ -88,7 +88,7 @@ func ToProduct(tb TimeBin, meta any) Product {
 		}
 	} else {
 		return Product{
-			Name:   "unknown",
+			Name:   "",
 			Time:   tb.Time,
 			Value:  tb.Value,
 			IsNull: tb.IsNull,

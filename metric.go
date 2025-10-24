@@ -1,6 +1,7 @@
 package metric
 
 import (
+	"encoding/json"
 	"errors"
 	"expvar"
 	"fmt"
@@ -442,6 +443,14 @@ type Product struct {
 	Period      time.Duration `json:"period,omitempty"`
 	Type        string        `json:"type,omitempty"`
 	Unit        Unit          `json:"unit,omitempty"`
+}
+
+func (p Product) String() string {
+	b, err := json.Marshal(p)
+	if err != nil {
+		return fmt.Sprintf("Product<error: %v>", err)
+	}
+	return string(b)
 }
 
 func (c *Collector) onProduct(prd Product) {
