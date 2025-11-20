@@ -374,7 +374,7 @@ func (c *Collector) Send(measurements ...Measure) {
 		measures: measurements,
 		ts:       nowFunc(),
 	}
-	c.receive(g)
+	c.recvCh <- g
 }
 
 func (c *Collector) runInputs(ts time.Time) {
@@ -394,9 +394,9 @@ func (c *Collector) runInputs(ts time.Time) {
 			continue
 		}
 		gather.ts = ts
-		c.receive(gather)
+		c.recvCh <- gather
 	}
-	c.receive(&Gather{noop: true, ts: ts})
+	c.recvCh <- &Gather{noop: true, ts: ts}
 }
 
 func (c *Collector) receive(m *Gather) {
