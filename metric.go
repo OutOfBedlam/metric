@@ -343,7 +343,6 @@ func (c *Collector) Start() {
 func (c *Collector) Stop() {
 	close(c.closeCh)
 	c.stopWg.Wait()
-	close(c.recvCh)
 	c.syncStorage()
 	// call DeInit() of inputs if exists
 	for _, input := range c.inputs {
@@ -357,6 +356,8 @@ func (c *Collector) Stop() {
 			hasDeInit.DeInit()
 		}
 	}
+	// close at the end to avoid sending to closed channel
+	close(c.recvCh)
 }
 
 func (c *Collector) makePublishName(metricName string) string {
@@ -373,7 +374,7 @@ func (c *Collector) Send(measurements ...Measure) {
 		measures: measurements,
 		ts:       nowFunc(),
 	}
-	c.recvCh <- g
+	c.receive(g)
 }
 
 func (c *Collector) runInputs(ts time.Time) {
@@ -393,9 +394,9 @@ func (c *Collector) runInputs(ts time.Time) {
 			continue
 		}
 		gather.ts = ts
-		c.recvCh <- gather
+		c.receive(gather)
 	}
-	c.recvCh <- &Gather{noop: true, ts: ts}
+	c.receive(&Gather{noop: true, ts: ts})
 }
 
 func (c *Collector) receive(m *Gather) {
