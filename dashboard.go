@@ -298,8 +298,9 @@ func (d Dashboard) HandleFunc(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d Dashboard) HandleIndex(w http.ResponseWriter, r *http.Request) {
-	// BasePath
-	d.Option.BasePath = r.URL.Path
+	// BasePath: Leave empty to use the relative URL path
+	// It will help in serving through reverse proxy that rewrite the path other than r.uRL.Path
+	d.Option.BasePath = ""
 	// tsIdx
 	tsIdxStr := r.URL.Query().Get("tsIdx")
 	if _, err := fmt.Sscanf(tsIdxStr, "%d", &d.SeriesIdx); err != nil {
